@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-DEVOPS-001",
+  "project_id": "PROJECT-001",
+  "agent_id": "devops-01",
+  "role": "DEVOPS",
+  "action": "generate_ci_config",
+  "instruction": "Tạo cấu hình CI pipeline tự động kiểm thử và build",
+  "context": {
+    "config_type": "github_actions"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 60
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-DEVOPS-003",
+  "project_id": "PROJECT-001",
+  "agent_id": "devops-01",
+  "role": "DEVOPS",
+  "action": "run_tests",
+  "instruction": "Chạy bộ kiểm thử tự động hệ thống",
+  "context": {
+    "test_path": "tests"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 120
+  }
+}

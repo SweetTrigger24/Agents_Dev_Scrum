@@ -1,0 +1,19 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-DEVOPS-005",
+  "project_id": "PROJECT-001",
+  "agent_id": "devops-01",
+  "role": "DEVOPS",
+  "action": "health_check",
+  "instruction": "Kiểm tra endpoint sức khỏe của dịch vụ staging",
+  "context": {
+    "endpoint": "https://ecommerce-api.staging.internal/health",
+    "timeout_seconds": 5.0
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "MEDIUM",
+    "timeout_seconds": 30
+  }
+}

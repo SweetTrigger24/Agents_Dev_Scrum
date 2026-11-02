@@ -1,0 +1,19 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-DEVOPS-002",
+  "project_id": "PROJECT-001",
+  "agent_id": "devops-01",
+  "role": "DEVOPS",
+  "action": "build_image",
+  "instruction": "Đóng gói Docker image cho service backend",
+  "context": {
+    "tag": "backend-service:v1.0",
+    "dockerfile": "Dockerfile"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 300
+  }
+}

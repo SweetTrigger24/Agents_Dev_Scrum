@@ -1,0 +1,24 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-DEVOPS-004",
+  "project_id": "PROJECT-001",
+  "agent_id": "devops-01",
+  "role": "DEVOPS",
+  "action": "deploy",
+  "instruction": "Triển khai dịch vụ lên môi trường staging",
+  "context": {
+    "service_name": "ecommerce-api",
+    "environment": "staging",
+    "image_tag": "ecommerce-api:v1.0",
+    "rollback_plan": [
+      "docker compose down",
+      "docker compose -f rollback.yml up -d"
+    ]
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 300
+  }
+}
