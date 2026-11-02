@@ -19,6 +19,8 @@ from config import DevOpsConfig
 from llm import LLMClient
 
 config = DevOpsConfig()
+config.verify_startup(check_port=False)
+
 mock_mode = not bool(config.llm_api_key.strip())
 llm_client = LLMClient(config=config, mock=mock_mode)
 agent_instance = DevOpsAgent(config=config, llm=llm_client)
@@ -32,11 +34,18 @@ app = FastAPI(
 
 @app.get("/health", summary="Kiểm tra trạng thái sẵn sàng của DevOps Agent")
 def health() -> dict[str, str]:
+    role_val = (
+        agent_instance.identity.role.value
+        if hasattr(agent_instance.identity.role, "value")
+        else str(agent_instance.identity.role)
+    )
     return {
-        "status": "ok",
+        "status": "healthy",
         "agent_id": agent_instance.identity.agent_id,
-        "role": agent_instance.identity.role.value,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "role": role_val,
+        "contract_version": CONTRACT_VERSION,
+        "agent_version": agent_instance.identity.version,
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 

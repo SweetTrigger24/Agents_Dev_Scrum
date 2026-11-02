@@ -3,6 +3,9 @@
 Tất cả các thay đổi về Agent Contract sẽ được ghi lại tại tài liệu này.
 
 ## [1.0.0] - 2026-11-02
+### Cập nhật cấu hình môi trường
+- thêm HOST, PORT, CONTRACT_MIN_VERSION; không đổi schema nên không tăng CONTRACT_VERSION.
+
 ### Khởi tạo ban đầu
 - Định nghĩa các Enum: `AgentRole`, `AgentStatus`, `TaskStatus`, `Priority`, `ArtifactType`, `ErrorCode`.
 - Định nghĩa các Model chuẩn (Pydantic v2): `AgentIdentity`, `AgentState`, `ArtifactRef`, `Constraints`, `TaskRequest`, `AgentError`, `NextAction`, `TaskResult`.

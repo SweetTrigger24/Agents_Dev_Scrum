@@ -27,8 +27,10 @@ from tools.artifact import ArtifactError, list_artifacts, read_artifact, save_ar
 
 
 @pytest.fixture
-def sample_config() -> AgentConfig:
+def sample_config(tmp_path) -> AgentConfig:
     return AgentConfig(
+        base_dir=tmp_path,
+        port=8000,
         agent_id="pm-01",
         agent_role=AgentRole.PM,
         llm_provider="groq",
@@ -271,7 +273,12 @@ class TestFastAPIEndpoints:
         # GET /health
         res_health = client.get("/health")
         assert res_health.status_code == 200
-        assert res_health.json()["status"] == "ok"
+        health_data = res_health.json()
+        assert health_data["status"] in ["ok", "healthy"]
+        assert "agent_id" in health_data
+        assert "role" in health_data
+        assert "contract_version" in health_data
+        assert "agent_version" in health_data
         assert "timestamp" in res_health.json()
 
         # GET /agent

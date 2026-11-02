@@ -1,0 +1,7 @@
+agents:
+  - name: pm
+    path: agents/pm
+    port: 8001
+  - name: devops
+    path: agents/devops
+    port: 8002

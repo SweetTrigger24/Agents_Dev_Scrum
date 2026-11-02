@@ -35,6 +35,8 @@ from tools.task import TaskToolError, assign_task, create_task, load_tasks
 @pytest.fixture
 def pm_config(tmp_path) -> PMConfig:
     return PMConfig(
+        base_dir=tmp_path,
+        port=8001,
         agent_id="pm-01",
         agent_role=AgentRole.PM,
         artifact_dir=str(tmp_path / "artifacts"),

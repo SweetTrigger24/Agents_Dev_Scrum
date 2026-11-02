@@ -199,6 +199,9 @@ Mỗi `action` ánh xạ về đúng một `capability`. Agent nhận action kh�
 ## 2.6 Cấu hình LLM chung (`.env.example`)
 
 ```
+HOST=0.0.0.0
+PORT=                        # bắt buộc, không có giá trị mặc định chung
+CONTRACT_MIN_VERSION=1.0.0
 AGENT_ID=pm-01
 AGENT_ROLE=PM
 LLM_PROVIDER=groq            # groq | gemini | openrouter | ollama | openai | custom

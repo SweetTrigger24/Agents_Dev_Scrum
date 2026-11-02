@@ -29,8 +29,11 @@ from agent_contract.validators import (
     validate_task_result_status_and_error,
 )
 
+__version__ = CONTRACT_VERSION
+
 __all__ = [
     "CONTRACT_VERSION",
+    "__version__",
     "AgentRole",
     "AgentStatus",
     "TaskStatus",

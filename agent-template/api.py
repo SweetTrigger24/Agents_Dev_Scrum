@@ -22,6 +22,8 @@ from llm import LLMClient
 
 # Khởi tạo cấu hình và Agent
 config = AgentConfig()
+config.verify_startup(check_port=False)
+
 identity = AgentIdentity(
     agent_id=config.agent_id,
     role=config.agent_role,
@@ -44,11 +46,19 @@ app = FastAPI(
 
 @app.get("/health", summary="Kiểm tra trạng thái sẵn sàng của dịch vụ")
 def health() -> dict[str, str]:
-    """Trả về trạng thái hoạt động của Agent service."""
+    """Trả về trạng thái hoạt động của Agent service theo Agent Contract v1.0."""
+    role_val = (
+        agent_instance.identity.role.value
+        if hasattr(agent_instance.identity.role, "value")
+        else str(agent_instance.identity.role)
+    )
     return {
-        "status": "ok",
+        "status": "healthy",
         "agent_id": agent_instance.identity.agent_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "role": role_val,
+        "contract_version": CONTRACT_VERSION,
+        "agent_version": agent_instance.identity.version,
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 

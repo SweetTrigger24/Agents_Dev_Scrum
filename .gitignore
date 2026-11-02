@@ -49,6 +49,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Logs & Local runner state
+logs/
+scripts/.run_local_state.json
+
 # Artifacts runtime storage
 artifacts/
 */artifacts/

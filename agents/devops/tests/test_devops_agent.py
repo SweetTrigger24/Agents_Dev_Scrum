@@ -37,6 +37,8 @@ def devops_config(tmp_path) -> DevOpsConfig:
     art = tmp_path / "artifacts"
     art.mkdir(parents=True, exist_ok=True)
     return DevOpsConfig(
+        base_dir=tmp_path,
+        port=8002,
         agent_id="devops-01",
         agent_role=AgentRole.DEVOPS,
         workspace_dir=str(ws),

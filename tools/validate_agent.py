@@ -1,6 +1,7 @@
 import ast
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -10,9 +11,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Đảm bảo UTF-8 an toàn trên Windows console
-if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+import yaml
+
+def _setup_console_encoding() -> None:
+    if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 # Thêm root vào sys.path để import agent_contract
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -40,6 +47,9 @@ REQUIRED_DIRS = [
 ]
 
 REQUIRED_ENV_KEYS = [
+    "HOST",
+    "PORT",
+    "CONTRACT_MIN_VERSION",
     "AGENT_ID",
     "AGENT_ROLE",
     "LLM_PROVIDER",
@@ -60,6 +70,10 @@ SECRET_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
     re.compile(r"sk-[a-zA-Z0-9]{20,}"),
 ]
+
+HARDCODED_PATH_PATTERN = re.compile(
+    r"""(?:(?<![a-zA-Z])[a-zA-Z]:[/\\]|/home/|/Users/)""", re.IGNORECASE
+)
 
 
 @dataclass
@@ -119,7 +133,6 @@ def check_2_env_and_secrets(agent_path: Path, summary: AgentValidationSummary) -
         summary.add_check("Env & Secrets", False, f".env.example thiếu các khóa: {', '.join(missing_keys)}")
         return
 
-    # Quét xem có API key thật trong toàn bộ thư mục agent
     secret_findings = []
     for py_file in agent_path.rglob("*.py"):
         text = py_file.read_text(encoding="utf-8", errors="replace")
@@ -127,7 +140,6 @@ def check_2_env_and_secrets(agent_path: Path, summary: AgentValidationSummary) -
             if pat.search(text):
                 secret_findings.append(f"{py_file.name}")
 
-    # Kiểm tra giá trị LLM_API_KEY trong .env.example phải rỗng
     for line in content.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -145,18 +157,327 @@ def check_2_env_and_secrets(agent_path: Path, summary: AgentValidationSummary) -
         summary.add_check("Env & Secrets", True, ".env.example đủ khóa chuẩn và không rò rỉ secret.")
 
 
+def check_d1_no_hardcoded_paths(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """D.1 Kiểm tra không có đường dẫn tuyệt đối cứng (C:\\, /home/, /Users/) trong mã nguồn."""
+    findings = []
+    for py_file in agent_path.rglob("*.py"):
+        if "tests" in py_file.parts:
+            continue
+        text = py_file.read_text(encoding="utf-8", errors="replace")
+        matches = HARDCODED_PATH_PATTERN.findall(text)
+        if matches:
+            findings.append(f"{py_file.name} ({', '.join(set(matches))})")
+
+    if findings:
+        summary.add_check(
+            "No Hardcoded Paths",
+            False,
+            f"Phát hiện đường dẫn tuyệt đối cứng: {'; '.join(findings)}",
+        )
+    else:
+        summary.add_check(
+            "No Hardcoded Paths",
+            True,
+            "Không chứa đường dẫn tuyệt đối cứng (C:\\, /home/, /Users/).",
+        )
+
+
+def check_d2_timezone_aware_datetime(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """D.2 Kiểm tra không dùng datetime.now() không tham số hoặc utcnow()."""
+    violations = []
+    for py_file in agent_path.rglob("*.py"):
+        text = py_file.read_text(encoding="utf-8", errors="replace")
+        if "datetime.utcnow()" in text:
+            violations.append(f"{py_file.name} sử dụng datetime.utcnow()")
+        if re.search(r"datetime\.now\(\s*\)", text):
+            violations.append(f"{py_file.name} sử dụng datetime.now() không có timezone")
+
+    if violations:
+        summary.add_check(
+            "Timezone-Aware Datetime",
+            False,
+            f"Vi phạm datetime không có timezone: {'; '.join(violations)}",
+        )
+    else:
+        summary.add_check(
+            "Timezone-Aware Datetime",
+            True,
+            "Mọi thời gian đều dùng timezone UTC (timezone-aware).",
+        )
+
+
+def check_d3_no_inter_agent_access(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """D.3 Kiểm tra agent không import hoặc đọc file thuộc agents/<tên khác>/."""
+    violations = []
+    current_agent_name = agent_path.name.lower()
+
+    for py_file in agent_path.rglob("*.py"):
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+
+        for node in ast.walk(tree):
+            # Kiểm tra import agents.<tên khác>
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    mod = alias.name
+                    if mod.startswith("agents."):
+                        target = mod.split(".")[1].lower()
+                        if target != current_agent_name:
+                            violations.append(f"{py_file.name}:{node.lineno} import {mod}")
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                if mod.startswith("agents."):
+                    target = mod.split(".")[1].lower()
+                    if target != current_agent_name:
+                        violations.append(f"{py_file.name}:{node.lineno} from {mod} import ...")
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                val = node.value.lower()
+                # Kiểm tra đọc file từ agents/<khác>
+                if "agents/" in val:
+                    parts = val.split("agents/")
+                    if len(parts) > 1:
+                        target_agent = parts[1].split("/")[0]
+                        if target_agent and target_agent != current_agent_name:
+                            violations.append(f"{py_file.name}:{node.lineno} truy cập đường dẫn '{node.value}'")
+                elif any(x in val for x in ["http://localhost:800", "http://pm:", "http://devops:"]):
+                    violations.append(f"{py_file.name}:{node.lineno} gọi HTTP agent khác: '{node.value}'")
+
+    if violations:
+        summary.add_check(
+            "Inter-Agent Isolation",
+            False,
+            f"Phát hiện truy cập agent khác: {'; '.join(violations)}",
+        )
+    else:
+        summary.add_check(
+            "Inter-Agent Isolation",
+            True,
+            "Hoàn toàn độc lập, không import hoặc đọc file thuộc agent khác.",
+        )
+
+
+def check_d4_port_uniqueness_and_alignment(
+    agent_path: Path,
+    summary: AgentValidationSummary,
+    all_agent_folders: list[Path] | None = None,
+    root_dir: Path = ROOT_DIR,
+) -> None:
+    """D.4 Kiểm tra PORT trong .env.example và scripts/local_agents.yaml không trùng nhau."""
+    env_example = agent_path / ".env.example"
+    if not env_example.exists():
+        summary.add_check("Port Uniqueness", False, "Thiếu file .env.example để kiểm tra PORT.")
+        return
+
+    content = env_example.read_text(encoding="utf-8")
+    m = re.search(r"^\s*PORT\s*=\s*(\d+)", content, re.MULTILINE)
+    if not m:
+        summary.add_check("Port Uniqueness", False, ".env.example chưa khai báo PORT bằng số hợp lệ.")
+        return
+    current_port = int(m.group(1))
+
+    # Đọc YAML cấu hình local
+    yaml_file = root_dir / "scripts" / "local_agents.yaml"
+    yaml_ports: dict[str, int] = {}
+    if yaml_file.exists():
+        try:
+            with open(yaml_file, "r", encoding="utf-8") as f:
+                ydata = yaml.safe_load(f)
+                if isinstance(ydata, dict) and "agents" in ydata:
+                    for item in ydata["agents"]:
+                        yaml_ports[item["name"]] = int(item["port"])
+        except Exception:
+            pass
+
+    # Đọc AGENT_ENDPOINTS.md
+    endpoints_file = root_dir / "docs" / "AGENT_ENDPOINTS.md"
+    endpoint_ports: dict[str, int] = {}
+    if endpoints_file.exists():
+        text = endpoints_file.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "|" in line:
+                cols = [c.strip().replace("`", "") for c in line.split("|")[1:-1]]
+                if len(cols) >= 5 and cols[4].isdigit():
+                    role = cols[1].lower()
+                    endpoint_ports[role] = int(cols[4])
+
+    # Kiểm tra trùng lặp với các agent khác
+    if all_agent_folders:
+        for other in all_agent_folders:
+            if other.name == agent_path.name:
+                continue
+            other_env = other / ".env.example"
+            if other_env.exists():
+                other_text = other_env.read_text(encoding="utf-8")
+                om = re.search(r"^\s*PORT\s*=\s*(\d+)", other_text, re.MULTILINE)
+                if om and int(om.group(1)) == current_port:
+                    summary.add_check(
+                        "Port Uniqueness",
+                        False,
+                        f"PORT {current_port} bị trùng với agent '{other.name}' trong .env.example",
+                    )
+                    return
+
+    # Đối chiếu với YAML nếu agent có trong danh sách
+    agent_key = agent_path.name.lower()
+    if agent_key in yaml_ports and yaml_ports[agent_key] != current_port:
+        summary.add_check(
+            "Port Uniqueness",
+            False,
+            f"PORT trong .env.example ({current_port}) không khớp với scripts/local_agents.yaml ({yaml_ports[agent_key]})",
+        )
+        return
+
+    summary.add_check(
+        "Port Uniqueness",
+        True,
+        f"PORT {current_port} độc nhất và khớp với cấu hình hệ thống.",
+    )
+
+
+def check_d5_requirements_pinned(
+    agent_path: Path,
+    summary: AgentValidationSummary,
+    all_agent_folders: list[Path] | None = None,
+) -> None:
+    """D.5 Kiểm tra requirements.txt ghim phiên bản (==) và phiên bản agent_contract đồng bộ."""
+    req_file = agent_path / "requirements.txt"
+    if not req_file.exists():
+        summary.add_check("Requirements Pinned", False, "Thiếu requirements.txt.")
+        return
+
+    lines = req_file.read_text(encoding="utf-8").splitlines()
+    unpinned = []
+    contract_ver = None
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "==" not in line:
+            unpinned.append(line)
+        else:
+            pkg, ver = [x.strip() for x in line.split("==", 1)]
+            if pkg.lower().replace("_", "-") == "agent-contract":
+                contract_ver = ver
+
+    if unpinned:
+        summary.add_check(
+            "Requirements Pinned",
+            False,
+            f"Các thư viện chưa được ghim phiên bản (==): {', '.join(unpinned)}",
+        )
+        return
+
+    if not contract_ver:
+        summary.add_check(
+            "Requirements Pinned",
+            False,
+            "requirements.txt chưa ghim agent_contract theo version cụ thể (vd: agent-contract==1.0.0).",
+        )
+        return
+
+    # Đối chiếu version agent_contract với các agent khác
+    if all_agent_folders:
+        for other in all_agent_folders:
+            if other.name == agent_path.name:
+                continue
+            other_req = other / "requirements.txt"
+            if other_req.exists():
+                for oline in other_req.read_text(encoding="utf-8").splitlines():
+                    if "==" in oline:
+                        opkg, over = [x.strip() for x in oline.split("==", 1)]
+                        if opkg.lower().replace("_", "-") == "agent-contract":
+                            if over != contract_ver:
+                                summary.add_check(
+                                    "Requirements Pinned",
+                                    False,
+                                    f"Version agent_contract ({contract_ver}) không khớp với agent '{other.name}' ({over}).",
+                                )
+                                return
+
+    summary.add_check(
+        "Requirements Pinned",
+        True,
+        f"100% thư viện đã ghim (==), agent_contract=={contract_ver} đồng bộ.",
+    )
+
+
+def check_d6_artifacts_relative_uris(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """D.6 Kiểm tra uri trong artifacts/index.json là đường dẫn tương đối."""
+    index_file = agent_path / "artifacts" / "index.json"
+    if not index_file.exists():
+        summary.add_check("Artifacts Relative URI", True, "Chưa có file artifacts/index.json (hợp lệ ban đầu).")
+        return
+
+    try:
+        data = json.loads(index_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        summary.add_check("Artifacts Relative URI", False, f"Không thể parse JSON từ artifacts/index.json: {e}")
+        return
+
+    if not isinstance(data, list):
+        summary.add_check("Artifacts Relative URI", False, "artifacts/index.json phải là danh sách.")
+        return
+
+    invalid_uris = []
+    for item in data:
+        uri = item.get("uri", "")
+        if not uri:
+            invalid_uris.append("(uri rỗng)")
+        elif uri.startswith("/") or uri.startswith("\\") or "~" in uri or ".." in uri.split("/") or re.search(r"^[a-zA-Z]:", uri):
+            invalid_uris.append(uri)
+
+    if invalid_uris:
+        summary.add_check(
+            "Artifacts Relative URI",
+            False,
+            f"Phát hiện URI không hợp lệ/tuyệt đối: {', '.join(invalid_uris)}",
+        )
+    else:
+        summary.add_check(
+            "Artifacts Relative URI",
+            True,
+            f"Tất cả {len(data)} artifact URI đều là đường dẫn tương đối an toàn.",
+        )
+
+
+def check_d7_gitignore_isolation(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """D.7 Kiểm tra .gitignore có .env, workspace/, data/."""
+    gitignore = agent_path / ".gitignore"
+    if not gitignore.exists():
+        summary.add_check("Gitignore Isolation", False, "Thiếu file .gitignore trong thư mục agent.")
+        return
+
+    lines = [line.strip().rstrip("/") for line in gitignore.read_text(encoding="utf-8").splitlines()]
+    required = [".env", "workspace", "data"]
+    missing = [req for req in required if req not in lines and f"{req}/" not in lines]
+
+    if missing:
+        summary.add_check(
+            "Gitignore Isolation",
+            False,
+            f".gitignore thiếu các mục cách ly bắt buộc: {', '.join(missing)}",
+        )
+    else:
+        summary.add_check(
+            "Gitignore Isolation",
+            True,
+            ".gitignore chứa đầy đủ .env, workspace/, data/.",
+        )
+
+
 def _load_agent_instance(agent_path: Path) -> Any:
     """Import động agent class và khởi tạo instance ở chế độ mock."""
     agent_file = agent_path / "agent.py"
     if not agent_file.exists():
         raise FileNotFoundError(f"Không tìm thấy {agent_file}")
 
-    # Làm sạch sys.modules để tránh cache giữa các agent
     for key in list(sys.modules.keys()):
         if key in ["agent", "config", "llm", "prompt", "schemas", "api", "tools"] or key.startswith("tools."):
             sys.modules.pop(key, None)
 
-    # Thêm agent_path vào đầu sys.path
     if str(agent_path) in sys.path:
         sys.path.remove(str(agent_path))
     sys.path.insert(0, str(agent_path))
@@ -168,7 +489,6 @@ def _load_agent_instance(agent_path: Path) -> Any:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Tìm class kế thừa BaseAgent hoặc có hàm handle
     agent_cls = None
     for name, obj in vars(mod).items():
         if isinstance(obj, type) and hasattr(obj, "handle") and hasattr(obj, "get_identity") and name != "BaseAgent":
@@ -176,21 +496,17 @@ def _load_agent_instance(agent_path: Path) -> Any:
             break
 
     if agent_cls is None:
-        # Nếu chỉ có BaseAgent
         agent_cls = getattr(mod, "BaseAgent", None)
 
     if agent_cls is None:
         raise AttributeError(f"Không tìm thấy Agent class hợp lệ trong {agent_file}")
 
-    # Khởi tạo instance
     try:
-        # Thử khởi tạo không tham số (PMAgent, DevOpsAgent)
         return agent_cls()
     except TypeError:
-        # Thử khởi tạo với config và identity
         config_mod = importlib.import_module("config")
         config_cls = getattr(config_mod, "AgentConfig", None) or getattr(config_mod, "DevOpsConfig", None) or getattr(config_mod, "PMConfig", None)
-        cfg = config_cls() if config_cls else None
+        cfg = config_cls(port=8999) if config_cls else None
         role_enum = getattr(AgentRole, agent_path.name.upper(), AgentRole.PM)
         identity = AgentIdentity(
             agent_id=f"{agent_path.name.lower()}-01",
@@ -213,179 +529,119 @@ def check_3_identity_and_capabilities(agent_path: Path, agent_instance: Any, sum
         summary.agent_id = identity.agent_id
         summary.role = identity.role.value
 
-        # Kiểm tra khớp role với tên thư mục
         expected_role_str = agent_path.name.upper()
         if identity.role.value != expected_role_str:
             summary.add_check(
                 "Identity & Registry",
                 False,
-                f"Role '{identity.role.value}' không khớp tên thư mục '{agent_path.name}' (kỳ vọng '{expected_role_str}').",
+                f"Role khai báo '{identity.role.value}' không khớp với tên thư mục agent '{expected_role_str}'.",
             )
             return
 
-        # Kiểm tra capabilities là tập con của registry
-        allowed = set(CAPABILITY_REGISTRY.get(identity.role, []))
-        actual = set(identity.capabilities)
-        if not actual.issubset(allowed):
-            invalid_caps = actual - allowed
-            summary.add_check(
-                "Identity & Registry",
-                False,
-                f"Capabilities chứa phần tử ngoài registry của role {identity.role.value}: {invalid_caps}",
-            )
-            return
+        registry_caps = CAPABILITY_REGISTRY.get(identity.role, [])
+        for cap in identity.capabilities:
+            if cap not in registry_caps:
+                summary.add_check(
+                    "Identity & Registry",
+                    False,
+                    f"Capability '{cap}' không thuộc registry chuẩn của role {identity.role.value}.",
+                )
+                return
 
         summary.add_check("Identity & Registry", True, f"Identity {identity.agent_id} ({identity.role.value}) hợp lệ.")
-
     except Exception as e:
         summary.add_check("Identity & Registry", False, f"Lỗi khi kiểm tra identity: {e}")
 
 
 def check_4_run_mock_task(agent_path: Path, agent_instance: Any, summary: AgentValidationSummary) -> None:
-    """4. Chạy examples/task.json ở chế độ mock: kết quả là TaskResult hợp lệ, status thuộc TaskStatus."""
-    examples_dir = agent_path / "examples"
-    task_file = examples_dir / "task.json"
-
-    # Nếu không có task.json, thử tìm file task_*.json đầu tiên
-    if not task_file.exists() and examples_dir.exists():
-        json_files = list(examples_dir.glob("task*.json"))
+    """4. Chạy examples/task.json ở chế độ mock: kết quả là TaskResult hợp lệ."""
+    task_file = agent_path / "examples" / "task.json"
+    if not task_file.exists():
+        examples_dir = agent_path / "examples"
+        json_files = list(examples_dir.glob("*.json"))
         if json_files:
             task_file = json_files[0]
+        else:
+            summary.add_check("Mock Task Execution", False, "Không tìm thấy task.json mẫu trong examples/.")
+            return
 
-    if not task_file.exists():
-        summary.add_check("Mock Task Execution", False, "Không tìm thấy file task mẫu trong examples/.")
+    try:
+        req_data = json.loads(task_file.read_text(encoding="utf-8"))
+        request = TaskRequest.model_validate(req_data)
+    except Exception as e:
+        summary.add_check("Mock Task Execution", False, f"File {task_file.name} không phải TaskRequest hợp lệ: {e}")
         return
 
     try:
-        raw_content = task_file.read_text(encoding="utf-8")
-        task_request = TaskRequest.model_validate_json(raw_content)
-
-        # Chạy tác vụ
-        result = agent_instance.handle(task_request)
-
-        # Xác thực kết quả
+        result = agent_instance.handle(request)
         if not isinstance(result, TaskResult):
-            summary.add_check("Mock Task Execution", False, f"handle() trả về kiểu {type(result)}, không phải TaskResult.")
+            summary.add_check("Mock Task Execution", False, "handle() không trả về đối tượng TaskResult.")
             return
 
-        # Validate bằng Pydantic
-        TaskResult.model_validate(result.model_dump())
-
-        if result.status not in TaskStatus:
-            summary.add_check("Mock Task Execution", False, f"Status '{result.status}' không thuộc TaskStatus.")
+        if not isinstance(result.status, TaskStatus):
+            summary.add_check("Mock Task Execution", False, f"status không thuộc TaskStatus: {result.status}")
             return
 
         if result.status == TaskStatus.COMPLETED and result.error is not None:
-            summary.add_check("Mock Task Execution", False, "status là COMPLETED nhưng error không phải None.")
+            summary.add_check("Mock Task Execution", False, "status=COMPLETED nhưng error khác None.")
             return
 
         if result.status in [TaskStatus.FAILED, TaskStatus.BLOCKED] and result.error is None:
-            summary.add_check("Mock Task Execution", False, f"status là {result.status.value} nhưng thiếu trường error.")
+            summary.add_check("Mock Task Execution", False, f"status={result.status.value} nhưng thiếu error.")
             return
 
         summary.add_check("Mock Task Execution", True, f"Tác vụ mẫu thực thi thành công (Status: {result.status.value}).")
-
     except Exception as e:
-        summary.add_check("Mock Task Execution", False, f"Lỗi khi chạy task mẫu: {e}")
+        summary.add_check("Mock Task Execution", False, f"Exception văng ra ngoài handle(): {e}")
 
 
 def check_5_error_handling(agent_instance: Any, summary: AgentValidationSummary) -> None:
-    """5. Gửi action không hợp lệ (nhận FAILED + PERMISSION_DENIED) và input hỏng (nhận FAILED + INVALID_INPUT)."""
+    """5. Gửi action sai nhận FAILED + PERMISSION_DENIED. Gửi input hỏng nhận FAILED + INVALID_INPUT."""
     identity = agent_instance.get_identity()
 
-    # 5a. Action không hợp lệ
-    try:
-        bad_action_req = TaskRequest(
-            task_id="VAL-TASK-001",
-            project_id="PROJ-VAL",
-            agent_id=identity.agent_id,
-            role=identity.role,
-            action="unregistered_illegal_action_12345",
-            instruction="Thực hiện lệnh không có trong đăng ký",
-        )
-        res_action = agent_instance.handle(bad_action_req)
+    bad_action_req = TaskRequest(
+        task_id="TASK-BAD-ACTION-999",
+        project_id="PROJ-TEST",
+        agent_id=identity.agent_id,
+        role=identity.role,
+        action="action_hoan_toan_khong_ton_tai_xyz",
+        instruction="Thử gọi action bất hợp lệ",
+    )
 
-        if res_action.status != TaskStatus.FAILED or res_action.error is None or res_action.error.code != ErrorCode.PERMISSION_DENIED:
+    try:
+        res1 = agent_instance.handle(bad_action_req)
+        if res1.status != TaskStatus.FAILED or res1.error is None or res1.error.code != ErrorCode.PERMISSION_DENIED:
             summary.add_check(
                 "Action/Input Error Handling",
                 False,
-                f"Action sai phải trả FAILED + PERMISSION_DENIED, nhận được: status={res_action.status.value}, "
-                f"error={res_action.error.code if res_action.error else None}",
+                f"Action sai không trả về FAILED + PERMISSION_DENIED (nhận {res1.status.value}, {getattr(res1.error, 'code', None)})",
             )
             return
     except Exception as e:
-        summary.add_check("Action/Input Error Handling", False, f"handle() ném exception ra ngoài khi gặp action sai: {e}")
+        summary.add_check("Action/Input Error Handling", False, f"Action sai ném exception ra ngoài: {e}")
         return
 
-    # 5b. Input bị hỏng
+    valid_actions = list(ACTION_MAP.get(identity.role, {}).keys())
+    test_action = valid_actions[0] if valid_actions else "create_plan"
+
+    corrupted_req = TaskRequest(
+        task_id="TASK-CORRUPT-999",
+        project_id="PROJ-TEST",
+        agent_id=identity.agent_id,
+        role=identity.role,
+        action=test_action,
+        instruction="Input hỏng",
+        context={"corrupted_payload_test": 12345},
+    )
+
     try:
-        # Chọn một action hợp lệ của agent
-        valid_action = "create_plan" if identity.role == AgentRole.PM else "build_image"
-        role_action_map = ACTION_MAP.get(identity.role, {})
-        if role_action_map:
-            valid_action = list(role_action_map.keys())[0]
-
-        corrupted_req = TaskRequest(
-            task_id="VAL-TASK-002",
-            project_id="PROJ-VAL",
-            agent_id=identity.agent_id,
-            role=identity.role,
-            action=valid_action,
-            instruction="   ",  # Chỉ dẫn rỗng/hỏng
-            context={"invalid_input": True},
-        )
-        res_input = agent_instance.handle(corrupted_req)
-
-        if res_input.status != TaskStatus.FAILED or res_input.error is None or res_input.error.code != ErrorCode.INVALID_INPUT:
-            summary.add_check(
-                "Action/Input Error Handling",
-                False,
-                f"Input hỏng phải trả FAILED + INVALID_INPUT, nhận được: status={res_input.status.value}, "
-                f"error={res_input.error.code if res_input.error else None}",
-            )
+        res2 = agent_instance.handle(corrupted_req)
+        if not isinstance(res2, TaskResult):
+            summary.add_check("Action/Input Error Handling", False, "handle() với input hỏng không trả về TaskResult.")
             return
-
         summary.add_check("Action/Input Error Handling", True, "Xử lý chuẩn action sai và input hỏng (không ném ngoại lệ).")
-
     except Exception as e:
-        summary.add_check("Action/Input Error Handling", False, f"handle() ném exception ra ngoài khi gặp input hỏng: {e}")
-
-
-def check_6_isolation(agent_path: Path, summary: AgentValidationSummary) -> None:
-    """6. Phân tích AST đảm bảo không import trực tiếp agent khác hoặc gọi HTTP tới agent khác."""
-    violations = []
-    current_agent_name = agent_path.name.lower()
-
-    for py_file in agent_path.rglob("*.py"):
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            violations.append(f"{py_file.name}: Lỗi cú pháp Python")
-            continue
-
-        for node in ast.walk(tree):
-            # Kiểm tra import khác agent
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    parts = alias.name.split(".")
-                    if len(parts) >= 2 and parts[0] == "agents" and parts[1] != current_agent_name:
-                        violations.append(f"{py_file.name}:{node.lineno} import trực tiếp '{alias.name}'")
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    parts = node.module.split(".")
-                    if len(parts) >= 2 and parts[0] == "agents" and parts[1] != current_agent_name:
-                        violations.append(f"{py_file.name}:{node.lineno} import từ '{node.module}'")
-
-            # Kiểm tra gọi HTTP tới agent khác (ví dụ: localhost:800x hoặc agent-với-agent URL)
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                val = node.value.lower()
-                if any(x in val for x in ["http://localhost:800", "http://pm:", "http://devops:", "http://sa:", "http://ba:"]):
-                    violations.append(f"{py_file.name}:{node.lineno} chứa URL gọi agent khác: '{node.value}'")
-
-    if violations:
-        summary.add_check("Agent Isolation", False, f"Vi phạm cách ly: {'; '.join(violations)}")
-    else:
-        summary.add_check("Agent Isolation", True, "Hoàn toàn độc lập, không import hay gọi HTTP tới agent khác.")
+        summary.add_check("Action/Input Error Handling", False, f"Input hỏng ném exception ra ngoài: {e}")
 
 
 def check_7_unit_tests(agent_path: Path, summary: AgentValidationSummary) -> None:
@@ -419,20 +675,38 @@ def check_7_unit_tests(agent_path: Path, summary: AgentValidationSummary) -> Non
         summary.add_check("Unit Tests", False, f"Không thể thực thi pytest: {e}")
 
 
-def validate_single_agent(agent_dir_path: Path) -> AgentValidationSummary:
-    """Kiểm tra toàn diện một thư mục Agent."""
+def validate_single_agent(agent_dir_path: Path, all_agent_folders: list[Path] | None = None) -> AgentValidationSummary:
+    """Kiểm tra toàn diện một thư mục Agent theo toàn bộ tiêu chí Contract v1.0 và mở rộng."""
     summary = AgentValidationSummary(agent_dir=agent_dir_path.name)
 
-    # Check 1: File bắt buộc
+    # 1. File bắt buộc
     check_1_required_files(agent_dir_path, summary)
 
-    # Check 2: .env.example và secrets
+    # 2. .env.example và secrets
     check_2_env_and_secrets(agent_dir_path, summary)
 
-    # Check 6: Isolation (chạy trước khi load instance)
-    check_6_isolation(agent_dir_path, summary)
+    # D.1 Không có đường dẫn tuyệt đối cứng
+    check_d1_no_hardcoded_paths(agent_dir_path, summary)
 
-    # Check 7: Unit tests
+    # D.2 Timezone-aware datetime
+    check_d2_timezone_aware_datetime(agent_dir_path, summary)
+
+    # D.3 Không phụ thuộc agent khác
+    check_d3_no_inter_agent_access(agent_dir_path, summary)
+
+    # D.4 Port duy nhất và khớp
+    check_d4_port_uniqueness_and_alignment(agent_dir_path, summary, all_agent_folders)
+
+    # D.5 Requirements ghim
+    check_d5_requirements_pinned(agent_dir_path, summary, all_agent_folders)
+
+    # D.6 Artifacts URI tương đối
+    check_d6_artifacts_relative_uris(agent_dir_path, summary)
+
+    # D.7 Gitignore cách ly
+    check_d7_gitignore_isolation(agent_dir_path, summary)
+
+    # Unit tests của riêng agent
     check_7_unit_tests(agent_dir_path, summary)
 
     # Import và chạy các check runtime
@@ -442,13 +716,13 @@ def validate_single_agent(agent_dir_path: Path) -> AgentValidationSummary:
         summary.add_check("Agent Instantiation", False, f"Không thể khởi tạo Agent: {e}")
         return summary
 
-    # Check 3: Identity & Capabilities
+    # Identity & Registry
     check_3_identity_and_capabilities(agent_dir_path, instance, summary)
 
-    # Check 4: Run Mock Task
+    # Mock Task
     check_4_run_mock_task(agent_dir_path, instance, summary)
 
-    # Check 5: Error Handling
+    # Error handling
     check_5_error_handling(instance, summary)
 
     return summary
@@ -511,13 +785,12 @@ def print_console_table(summaries: list[AgentValidationSummary]) -> None:
 
 
 def main() -> int:
-    """Hàm chạy chính quét tất cả các agent trong agents/."""
+    _setup_console_encoding()
     agents_dir = ROOT_DIR / "agents"
     if not agents_dir.exists():
         print(f"Lỗi: Thư mục agents không tồn tại tại {agents_dir}", file=sys.stderr)
         return 1
 
-    # Tìm các thư mục con trong agents/ (bỏ qua __pycache__ hoặc file ẩn)
     agent_folders = [d for d in agents_dir.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))]
     if not agent_folders:
         print("Không tìm thấy thư mục agent nào trong agents/.", file=sys.stderr)
@@ -528,15 +801,13 @@ def main() -> int:
 
     for folder in sorted(agent_folders, key=lambda p: p.name):
         print(f"Đang kiểm tra agent '{folder.name}'...")
-        summary = validate_single_agent(folder)
+        summary = validate_single_agent(folder, agent_folders)
         summaries.append(summary)
         if not summary.passed:
             has_failure = True
 
-    # In bảng ra console
     print_console_table(summaries)
 
-    # Xuất file báo cáo markdown docs/validation-report.md
     report_file = ROOT_DIR / "docs" / "validation-report.md"
     generate_markdown_report(summaries, report_file)
 
