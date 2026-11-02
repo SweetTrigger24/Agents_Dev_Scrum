@@ -2,10 +2,14 @@ import json
 import sys
 from pathlib import Path
 
-# Đảm bảo import được các module trong agent-template
+# Đảm bảo import được các module trong agent-template và tránh xung đột cache sys.modules
 agent_template_dir = Path(__file__).resolve().parent.parent
 if str(agent_template_dir) not in sys.path:
     sys.path.insert(0, str(agent_template_dir))
+
+for key in list(sys.modules.keys()):
+    if key in ["agent", "config", "llm", "prompt", "schemas", "api", "tools"] or key.startswith("tools."):
+        sys.modules.pop(key, None)
 
 import pytest
 from fastapi.testclient import TestClient

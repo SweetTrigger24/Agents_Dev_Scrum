@@ -1,0 +1,19 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-003",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "decompose_tasks",
+  "instruction": "Phân rã kế hoạch dự án thành danh sách các task kỹ thuật cho Sprint 1 với đầy đủ tiêu chí nghiệm thu và vai trò",
+  "context": {
+    "sprint_number": 1,
+    "focus": "Core Architecture & Requirements"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 300
+  }
+}

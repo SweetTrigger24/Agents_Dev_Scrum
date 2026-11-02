@@ -1,0 +1,23 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-004",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "assign_tasks",
+  "instruction": "Phân công các task trong backlog cho các vai trò DEV, TESTER, DEVOPS, BA phù hợp với năng lực",
+  "context": {
+    "assignments": {
+      "TASK-001": "BA",
+      "TASK-002": "SA",
+      "TASK-003": "DBA",
+      "TASK-004": "DEVOPS"
+    }
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "MEDIUM",
+    "timeout_seconds": 120
+  }
+}

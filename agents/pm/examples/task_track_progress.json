@@ -1,0 +1,16 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-005",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "track_progress",
+  "instruction": "Kiểm tra tiến độ thực hiện các task hiện có trong backlog và tính tỷ lệ hoàn thành",
+  "context": {},
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "LOW",
+    "timeout_seconds": 60
+  }
+}

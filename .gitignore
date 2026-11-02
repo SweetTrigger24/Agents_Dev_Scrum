@@ -48,3 +48,8 @@ htmlcov/
 *~
 .DS_Store
 Thumbs.db
+
+# Artifacts runtime storage
+artifacts/
+*/artifacts/
+

@@ -1,0 +1,16 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-006",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "report_status",
+  "instruction": "Tổng hợp báo cáo trạng thái dự án đầy đủ 4 mục chuẩn (đã xong, đang làm, bị chặn, việc tiếp theo)",
+  "context": {},
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "MEDIUM",
+    "timeout_seconds": 120
+  }
+}

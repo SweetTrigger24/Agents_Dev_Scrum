@@ -1,0 +1,20 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-001",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "analyze_requirement",
+  "instruction": "Phân tích yêu cầu sơ bộ xây dựng hệ thống website thương mại điện tử đa kênh, 5 người, 12 tuần",
+  "context": {
+    "team_size": 5,
+    "duration_weeks": 12,
+    "domain": "e-commerce"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 180
+  }
+}
