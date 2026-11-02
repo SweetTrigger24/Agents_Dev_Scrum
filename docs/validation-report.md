@@ -1,6 +1,6 @@
 # Báo cáo Contract Validation các Agent (Agent Contract v1.0)
 
-*Thời gian tạo: 2026-11-02 05:29:50 UTC*
+*Thời gian tạo: 2026-11-02 05:41:58 UTC*
 
 ## 1. Tổng quan kết quả
 
@@ -38,7 +38,7 @@
 | Inter-Agent Isolation | PASS | Hoàn toàn độc lập, không import hoặc đọc file thuộc agent khác. |
 | Port Uniqueness | PASS | PORT 8001 độc nhất và khớp với cấu hình hệ thống. |
 | Requirements Pinned | PASS | 100% thư viện đã ghim (==), agent_contract==1.0.0 đồng bộ. |
-| Artifacts Relative URI | PASS | Tất cả 55 artifact URI đều là đường dẫn tương đối an toàn. |
+| Artifacts Relative URI | PASS | Tất cả 66 artifact URI đều là đường dẫn tương đối an toàn. |
 | Gitignore Isolation | PASS | .gitignore chứa đầy đủ .env, workspace/, data/. |
 | Unit Tests | PASS | Pytest chạy xanh (1 file test). |
 | Identity & Registry | PASS | Identity pm-01 (PM) hợp lệ. |
