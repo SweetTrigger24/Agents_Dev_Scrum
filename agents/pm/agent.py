@@ -115,6 +115,18 @@ class BaseAgent:
         """Xử lý TaskRequest, kiểm tra quyền hạn, bắt ngoại lệ và trả về TaskResult chuẩn."""
         start_time = time.perf_counter()
 
+        # 0. Kiểm tra dữ liệu đầu vào cơ bản (input hợp lệ)
+        if not request.instruction or not request.instruction.strip() or request.context.get("invalid_input"):
+            return failed_result(
+                request,
+                make_error(
+                    code=ErrorCode.INVALID_INPUT,
+                    message="Dữ liệu đầu vào bị hỏng hoặc thiếu chỉ dẫn thực thi hợp lệ.",
+                    retryable=False,
+                ),
+                summary="Dữ liệu đầu vào không hợp lệ.",
+            )
+
         # 1. Kiểm tra khớp Role
         if request.role != self.identity.role:
             return failed_result(
@@ -248,8 +260,8 @@ class BaseAgent:
             self._current_task = None
             final_result = failed_result(
                 request,
-                make_error(code=ErrorCode.VALIDATION_ERROR, message=str(err), retryable=False),
-                summary=f"Lỗi validation khi thực thi action '{request.action}'",
+                make_error(code=ErrorCode.INVALID_INPUT, message=str(err), retryable=False),
+                summary=f"Lỗi dữ liệu đầu vào không hợp lệ khi thực thi action '{request.action}'",
             )
         except Exception as err:
             self.identity.status = AgentStatus.FAILED

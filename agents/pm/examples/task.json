@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-PM-DEFAULT",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "create_plan",
+  "instruction": "Lập kế hoạch tổng thể dự án web bán hàng gồm các milestone và sprint",
+  "context": {
+    "project_name": "E-Commerce System"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "HIGH",
+    "timeout_seconds": 300
+  }
+}

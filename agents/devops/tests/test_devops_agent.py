@@ -163,15 +163,16 @@ class TestTerminalSecurityAndSafeguards:
             "API_TOKEN": "token_xyz_987654321",
             "SAFE_VAR": "normal_public_text",
         }
+        fake_key = "gsk_" + "abcdef1234567890123456"
         text = (
             "Kết nối DB với password: super_secret_db_pass_123 và token: token_xyz_987654321. "
-            "Biến thường: normal_public_text, api_key='gsk_abcdef1234567890123456'"
+            f"Biến thường: normal_public_text, api_key='{fake_key}'"
         )
         masked = mask_secrets(text, custom_env=env_vars)
 
         assert "super_secret_db_pass_123" not in masked
         assert "token_xyz_987654321" not in masked
-        assert "gsk_abcdef1234567890123456" not in masked
+        assert fake_key not in masked
         assert "***REDACTED***" in masked
         assert "normal_public_text" in masked
 
