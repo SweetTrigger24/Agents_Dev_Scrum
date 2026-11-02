@@ -7,6 +7,7 @@ if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from agent_contract.models import (
     CONTRACT_VERSION,
     AgentIdentity,
@@ -30,6 +31,12 @@ app = FastAPI(
     version=CONTRACT_VERSION,
     description="Dịch vụ API độc lập của DevOps Agent theo Agent Contract v1.0",
 )
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    """Tự động chuyển hướng từ trang chủ sang Swagger UI (/docs)."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health", summary="Kiểm tra trạng thái sẵn sàng của DevOps Agent")
