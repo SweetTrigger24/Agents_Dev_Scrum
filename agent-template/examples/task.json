@@ -1,0 +1,19 @@
+{
+  "contract_version": "1.0.0",
+  "task_id": "TASK-001",
+  "project_id": "PROJECT-001",
+  "agent_id": "pm-01",
+  "role": "PM",
+  "action": "echo",
+  "instruction": "Xin chào, đây là tác vụ echo kiểm tra hoạt động của Agent Template",
+  "context": {
+    "test_mode": true,
+    "sender": "senior-engineer"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "deadline": null,
+    "priority": "MEDIUM",
+    "timeout_seconds": 60
+  }
+}
