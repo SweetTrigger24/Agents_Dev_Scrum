@@ -106,6 +106,13 @@ def main() -> None:
         print("=" * 70)
         print(f"KẾT QUẢ THỰC THI: {result.status.value}")
         print(f"Tóm tắt: {result.summary}")
+        if result.error:
+            print(f"Chi tiết lỗi / lý do: {result.error.message} (Mã: {result.error.code.value})")
+            questions = result.error.details.get("questions") if result.error.details else None
+            if questions:
+                print("Các câu hỏi cần làm rõ:")
+                for q in questions:
+                    print(f"  ? {q}")
         if result.artifacts:
             print("Artifacts tạo ra:")
             for art in result.artifacts:
@@ -168,6 +175,13 @@ def main() -> None:
             result = agent.handle(request)
 
             print(f"\nAgent [{result.status.value}] > {result.summary}")
+            if result.error:
+                print(f"⚠️  Lý do: {result.error.message}")
+                questions = result.error.details.get("questions") if result.error.details else None
+                if questions:
+                    print("❓ Agent cần bạn cung cấp thêm thông tin:")
+                    for q in questions:
+                        print(f"   • {q}")
             if result.artifacts:
                 print("📁 Artifacts vừa tạo:")
                 for art in result.artifacts:
