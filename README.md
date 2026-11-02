@@ -1,0 +1,33 @@
+# AI Team Monorepo
+
+Hệ thống 10 AI Agent độc lập xây dựng bởi đội ngũ 5 kỹ sư:
+PM, SA, BA, PO, DEV, TESTER, DEVOPS, DBA, SCRUM_MASTER, SECURITY.
+
+## 1. Cấu trúc thư mục
+- `contract/`: Gói Python dùng chung `agent_contract` chứa toàn bộ Enums, Pydantic Models, Registry, Validators và JSON Schemas.
+- `docs/`: Tài liệu đặc tả `CONTRACT.md` và lịch sử phiên bản `CHANGELOG.md`.
+- `agent-template/`: Mẫu Agent để clone và phát triển.
+- `agents/`: Thư mục chứa mã nguồn của từng agent (`pm`, `devops`, `sa`, ...).
+- `tools/`: Các công cụ hỗ trợ (như `validate_agent.py`).
+
+## 2. Quy tắc phát triển
+1. Mọi agent tuân theo Contract v1.0, I/O sử dụng Pydantic từ gói `agent_contract`.
+2. Không tự sửa protocol; muốn đổi phải thảo luận và tăng version contract.
+3. Không hard-code API key hay LLM provider; không commit `.env`.
+4. Agent chỉ thực hiện action thuộc capability đã khai báo trong `CAPABILITY_REGISTRY`.
+5. Agent không gọi trực tiếp agent khác; chỉ gợi ý qua `next_actions`.
+6. Mọi ngoại lệ bên trong agent phải được bắt và trả lời dưới dạng `TaskResult` kèm `AgentError`. Không ném exception ra ngoài `handle()`.
+7. Mọi agent phải có unit test chạy offline bằng mock LLM.
+
+## 3. Cài đặt Contract
+```bash
+pip install -e ./contract
+```
+Chạy test contract:
+```bash
+python -m pytest contract -v
+```
+Xuất JSON Schema:
+```bash
+python -m agent_contract.export_schemas
+```
