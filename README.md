@@ -31,3 +31,9 @@ Xuất JSON Schema:
 ```bash
 python -m agent_contract.export_schemas
 ```
+
+## 4. Hướng dẫn kết nối mạng LAN & Thiết lập nhiều máy (Multi-Machine)
+Xem tài liệu hướng dẫn chi tiết tại [`docs/CONNECTIVITY_GUIDE.md`](docs/CONNECTIVITY_GUIDE.md):
+- Bảng phân bổ 10 Agent trên 5 máy (cổng 8001 - 8010).
+- Tiện ích thiết lập nhanh: `python scripts/configure_lan.py setup-machine <1..5>`.
+- Kiểm tra kết nối mạng LAN: `python scripts/lan_check.py`.
