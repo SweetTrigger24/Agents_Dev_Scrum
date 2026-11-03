@@ -265,12 +265,14 @@ class TestToolExceptionHandling:
 
 
 class TestFastAPIEndpoints:
-    """Kiểm tra các endpoint của FastAPI service (GET /health, /agent, /state, POST /tasks)."""
+    """Kiểm tra các endpoint của FastAPI service theo Agent API v1."""
 
     def test_api_endpoints(self, sample_task_request):
+        api_config = app.state.config
         client = TestClient(app)
+        auth_headers = {"Authorization": f"Bearer {api_config.agent_api_key}"}
 
-        # GET /health
+        # GET /health (không cần token)
         res_health = client.get("/health")
         assert res_health.status_code == 200
         health_data = res_health.json()
@@ -281,24 +283,41 @@ class TestFastAPIEndpoints:
         assert "agent_version" in health_data
         assert "timestamp" in res_health.json()
 
-        # GET /agent
-        res_agent = client.get("/agent")
+        # Thiếu token trả 401
+        res_unauth = client.get("/agent")
+        assert res_unauth.status_code == 401
+
+        res_bad_token = client.get("/agent", headers={"Authorization": "Bearer sai-token"})
+        assert res_bad_token.status_code == 401
+
+        # GET /agent (có token)
+        res_agent = client.get("/agent", headers=auth_headers)
         assert res_agent.status_code == 200
         agent_data = res_agent.json()
         assert agent_data["agent_id"] == "pm-01"
         assert agent_data["role"] == "PM"
 
-        # GET /state
-        res_state = client.get("/state")
+        # GET /state (có token)
+        res_state = client.get("/state", headers=auth_headers)
         assert res_state.status_code == 200
         state_data = res_state.json()
         assert state_data["agent_id"] == "pm-01"
         assert state_data["status"] == "IDLE"
 
-        # POST /tasks
-        res_task = client.post("/tasks", json=sample_task_request.model_dump(mode="json"))
+        # POST /tasks (có token)
+        res_task = client.post("/tasks", json=sample_task_request.model_dump(mode="json"), headers=auth_headers)
         assert res_task.status_code == 200
         task_res = res_task.json()
         assert task_res["status"] == "COMPLETED"
         assert task_res["task_id"] == "TASK-TEST-001"
         assert task_res["error"] is None
+
+        # GET /tasks/{task_id}
+        res_get_task = client.get(f"/tasks/{sample_task_request.task_id}", headers=auth_headers)
+        assert res_get_task.status_code == 200
+        assert res_get_task.json()["task_id"] == sample_task_request.task_id
+
+        # GET /artifacts
+        res_artifacts = client.get("/artifacts", headers=auth_headers)
+        assert res_artifacts.status_code == 200
+        assert isinstance(res_artifacts.json(), list)

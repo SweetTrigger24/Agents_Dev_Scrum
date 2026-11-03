@@ -2,6 +2,14 @@
 
 Tất cả các thay đổi về Agent Contract sẽ được ghi lại tại tài liệu này.
 
+## [1.0.0] - 2026-11-03
+### Bổ sung Agent API v1 (Prompt 7)
+- Thêm mục 2.8 "Agent API v1" vào `docs/CONTRACT.md`:
+  - Chuẩn hóa các endpoint HTTP: `/health`, `/agent`, `/state`, `/tasks`, `/tasks/{task_id}`, `/artifacts`, `/artifacts/{id}/content`, `/artifacts/inbox`.
+  - Cơ chế xác thực Bearer Token qua header `Authorization: Bearer <AGENT_API_KEY>` (ngoại trừ `/health`).
+  - Thêm `AGENT_API_KEY`, `MAX_UPLOAD_MB` vào cấu hình `.env.example`.
+  - Không đổi schema Pydantic nên không tăng `CONTRACT_VERSION` (vẫn giữ 1.0.0).
+
 ## [1.0.0] - 2026-11-02
 ### Cập nhật cấu hình môi trường
 - thêm HOST, PORT, CONTRACT_MIN_VERSION; không đổi schema nên không tăng CONTRACT_VERSION.

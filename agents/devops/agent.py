@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -186,6 +187,57 @@ class BaseAgent:
                     retryable=False,
                 ),
             )
+
+        # 4b. Kiểm tra input_artifacts đã có trong inbox/ và khớp checksum chưa
+        if request.input_artifacts:
+            missing_artifacts = []
+            inbox_dir = Path(self.config.artifact_dir) / "inbox"
+            for art in request.input_artifacts:
+                art_file = None
+                if art.uri:
+                    clean_uri = art.uri.replace("\\", "/").strip().lstrip("/")
+                    cand1 = (Path(self.config.artifact_dir).parent / clean_uri).resolve()
+                    if cand1.exists() and cand1.is_file():
+                        art_file = cand1
+                    else:
+                        cand2 = (Path(self.config.artifact_dir) / Path(clean_uri).name).resolve()
+                        if cand2.exists() and cand2.is_file():
+                            art_file = cand2
+
+                if not art_file and inbox_dir.exists():
+                    for cand in [
+                        inbox_dir / art.created_by / art.name,
+                        inbox_dir / art.name,
+                    ]:
+                        if cand.exists() and cand.is_file():
+                            art_file = cand
+                            break
+
+                if not art_file and inbox_dir.exists():
+                    for f in inbox_dir.rglob(art.name):
+                        if f.is_file():
+                            art_file = f
+                            break
+
+                if not art_file or not art_file.exists():
+                    missing_artifacts.append(art.artifact_id)
+                elif art.checksum:
+                    with open(art_file, "rb") as f:
+                        file_sha = hashlib.sha256(f.read()).hexdigest()
+                    if file_sha.lower() != art.checksum.lower():
+                        missing_artifacts.append(art.artifact_id)
+
+            if missing_artifacts:
+                return blocked_result(
+                    request,
+                    make_error(
+                        code=ErrorCode.MISSING_CONTEXT,
+                        message="Thiếu artifact đầu vào trong thư mục inbox hoặc sai lệch checksum SHA-256.",
+                        retryable=False,
+                        missing_artifacts=missing_artifacts,
+                    ),
+                    summary="Bị chặn do thiếu artifact đầu vào trong inbox.",
+                )
 
         # 5. Cập nhật trạng thái RUNNING
         self.identity.status = AgentStatus.RUNNING

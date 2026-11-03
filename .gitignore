@@ -53,6 +53,16 @@ Thumbs.db
 logs/
 scripts/.run_local_state.json
 
+# LAN Configuration & Tokens (Prompt 7)
+endpoints.yaml
+scripts/endpoints.yaml
+.env.lan
+*.lan
+
+# Results cache & runtime data
+data/results/
+*/data/results/
+
 # Artifacts runtime storage
 artifacts/
 */artifacts/

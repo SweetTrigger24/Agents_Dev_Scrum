@@ -66,6 +66,8 @@ class AgentConfig(BaseSettings):
     host: str = "0.0.0.0"
     port: int | None = None
     contract_min_version: str = "1.0.0"
+    agent_api_key: str = ""
+    max_upload_mb: int = 10
 
     # Định danh Agent và cấu hình LLM
     agent_id: str = "pm-01"
@@ -152,6 +154,14 @@ class AgentConfig(BaseSettings):
         if installed_ver < min_ver:
             raise RuntimeError(
                 f"Phiên bản agent_contract ({CONTRACT_VERSION}) thấp hơn yêu cầu tối thiểu ({self.contract_min_version}). Vui lòng nâng cấp agent_contract."
+            )
+
+        # Kiểm tra bảo mật LAN: nếu HOST khác 127.0.0.1 và localhost thì bắt buộc có AGENT_API_KEY
+        host_str = (self.host or "").strip().lower()
+        if host_str not in ["127.0.0.1", "localhost"] and not (self.agent_api_key and self.agent_api_key.strip()):
+            raise RuntimeError(
+                f"Bảo mật: HOST đang cấu hình là '{self.host}' (mở ra mạng ngoài). "
+                f"Bắt buộc phải cấu hình AGENT_API_KEY để bảo vệ an toàn qua mạng LAN."
             )
 
         if check_port and is_port_in_use(self.port, self.host):

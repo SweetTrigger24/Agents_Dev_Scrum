@@ -33,6 +33,7 @@ from agent_contract.registry import ACTION_MAP, CAPABILITY_REGISTRY
 REQUIRED_FILES = [
     "agent.py",
     "config.py",
+    "api.py",
     "prompt.py",
     "schemas.py",
     ".env.example",
@@ -52,6 +53,8 @@ REQUIRED_ENV_KEYS = [
     "CONTRACT_MIN_VERSION",
     "AGENT_ID",
     "AGENT_ROLE",
+    "AGENT_API_KEY",
+    "MAX_UPLOAD_MB",
     "LLM_PROVIDER",
     "LLM_MODEL",
     "LLM_API_KEY",
@@ -444,7 +447,7 @@ def check_d6_artifacts_relative_uris(agent_path: Path, summary: AgentValidationS
 
 
 def check_d7_gitignore_isolation(agent_path: Path, summary: AgentValidationSummary) -> None:
-    """D.7 Kiểm tra .gitignore có .env, workspace/, data/."""
+    """D.7 Kiểm tra .gitignore có .env, workspace/, data/ và root .gitignore có endpoints.yaml, .env.lan."""
     gitignore = agent_path / ".gitignore"
     if not gitignore.exists():
         summary.add_check("Gitignore Isolation", False, "Thiếu file .gitignore trong thư mục agent.")
@@ -453,6 +456,15 @@ def check_d7_gitignore_isolation(agent_path: Path, summary: AgentValidationSumma
     lines = [line.strip().rstrip("/") for line in gitignore.read_text(encoding="utf-8").splitlines()]
     required = [".env", "workspace", "data"]
     missing = [req for req in required if req not in lines and f"{req}/" not in lines]
+
+    # Kiểm tra root .gitignore có endpoints.yaml và .env.lan
+    root_gitignore = ROOT_DIR / ".gitignore"
+    if root_gitignore.exists():
+        root_lines = [l.strip().rstrip("/") for l in root_gitignore.read_text(encoding="utf-8").splitlines()]
+        lan_required = ["endpoints.yaml", ".env.lan"]
+        lan_missing = [req for req in lan_required if not any(req in rl for rl in root_lines)]
+        if lan_missing:
+            missing.extend(lan_missing)
 
     if missing:
         summary.add_check(
@@ -464,7 +476,7 @@ def check_d7_gitignore_isolation(agent_path: Path, summary: AgentValidationSumma
         summary.add_check(
             "Gitignore Isolation",
             True,
-            ".gitignore chứa đầy đủ .env, workspace/, data/.",
+            ".gitignore chứa đầy đủ .env, workspace/, data/, endpoints.yaml, .env.lan.",
         )
 
 
@@ -675,6 +687,105 @@ def check_7_unit_tests(agent_path: Path, summary: AgentValidationSummary) -> Non
         summary.add_check("Unit Tests", False, f"Không thể thực thi pytest: {e}")
 
 
+def check_f1_agent_api_v1(agent_path: Path, summary: AgentValidationSummary) -> None:
+    """F.1 Kiểm tra Agent API v1: đủ endpoints, endpoint ngoài /health yêu cầu Bearer token."""
+    api_file = agent_path / "api.py"
+    if not api_file.exists():
+        summary.add_check("Agent API v1", False, "Không tìm thấy file api.py trong thư mục agent.")
+        return
+
+    try:
+        from fastapi.testclient import TestClient
+
+        if str(agent_path) not in sys.path:
+            sys.path.insert(0, str(agent_path))
+
+        for key in list(sys.modules.keys()):
+            if key in ["api", "config", "agent", "llm", "prompt", "schemas", "tools"] or key.startswith("tools."):
+                sys.modules.pop(key, None)
+
+        spec = importlib.util.spec_from_file_location(f"api_module_{agent_path.name}", str(api_file))
+        if spec is None or spec.loader is None:
+            summary.add_check("Agent API v1", False, f"Không thể tải spec từ {api_file}")
+            return
+
+        api_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api_mod)
+        app = getattr(api_mod, "app", None)
+        if app is None:
+            summary.add_check("Agent API v1", False, "Không tìm thấy biến 'app' trong api.py")
+            return
+
+        routes: dict[str, set[str]] = {}
+        for route in app.routes:
+            if hasattr(route, "path") and hasattr(route, "methods"):
+                routes[route.path] = route.methods
+
+        required_endpoints = [
+            ("/health", "GET"),
+            ("/agent", "GET"),
+            ("/state", "GET"),
+            ("/tasks", "POST"),
+            ("/tasks/{task_id}", "GET"),
+            ("/artifacts", "GET"),
+            ("/artifacts/{artifact_id}/content", "GET"),
+            ("/artifacts/inbox", "POST"),
+        ]
+
+        missing_endpoints = []
+        for path, method in required_endpoints:
+            if path not in routes or method not in routes[path]:
+                missing_endpoints.append(f"{method} {path}")
+
+        if missing_endpoints:
+            summary.add_check(
+                "Agent API v1",
+                False,
+                f"Thiếu các endpoint Agent API v1 bắt buộc: {', '.join(missing_endpoints)}",
+            )
+            return
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # /health công khai không cần token
+        res_health = client.get("/health")
+        if res_health.status_code != 200:
+            summary.add_check(
+                "Agent API v1",
+                False,
+                f"GET /health yêu cầu trả 200 nhưng nhận được {res_health.status_code}",
+            )
+            return
+
+        # /agent không có token phải trả 401
+        res_agent = client.get("/agent")
+        if res_agent.status_code != 401:
+            summary.add_check(
+                "Agent API v1",
+                False,
+                f"GET /agent không có token phải trả 401 nhưng nhận được {res_agent.status_code}",
+            )
+            return
+
+        # /artifacts/inbox không có token phải trả 401
+        res_inbox = client.post("/artifacts/inbox")
+        if res_inbox.status_code != 401:
+            summary.add_check(
+                "Agent API v1",
+                False,
+                f"POST /artifacts/inbox không có token phải trả 401 nhưng nhận được {res_inbox.status_code}",
+            )
+            return
+
+        summary.add_check(
+            "Agent API v1",
+            True,
+            "Đầy đủ 8 endpoint Agent API v1, /health công khai, các endpoint khác yêu cầu Bearer token (401).",
+        )
+    except Exception as e:
+        summary.add_check("Agent API v1", False, f"Lỗi khi kiểm tra Agent API v1: {e}")
+
+
 def validate_single_agent(agent_dir_path: Path, all_agent_folders: list[Path] | None = None) -> AgentValidationSummary:
     """Kiểm tra toàn diện một thư mục Agent theo toàn bộ tiêu chí Contract v1.0 và mở rộng."""
     summary = AgentValidationSummary(agent_dir=agent_dir_path.name)
@@ -708,6 +819,9 @@ def validate_single_agent(agent_dir_path: Path, all_agent_folders: list[Path] | 
 
     # Unit tests của riêng agent
     check_7_unit_tests(agent_dir_path, summary)
+
+    # F.1 Agent API v1
+    check_f1_agent_api_v1(agent_dir_path, summary)
 
     # Import và chạy các check runtime
     try:

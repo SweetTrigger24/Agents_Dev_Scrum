@@ -1,0 +1,14 @@
+# scripts/endpoints.example.yaml
+# Mẫu cấu hình endpoint URL cho 10 Agent trong mạng LAN.
+# Copy file này thành scripts/endpoints.yaml (đã được gitignore) và cập nhật IP thực tế của các máy.
+
+pm-01: "http://127.0.0.1:8001"
+devops-01: "http://127.0.0.1:8002"
+ba-01: "http://192.168.1.102:8003"
+sa-01: "http://192.168.1.102:8004"
+po-01: "http://192.168.1.103:8005"
+dev-01: "http://192.168.1.103:8006"
+tester-01: "http://192.168.1.104:8007"
+dba-01: "http://192.168.1.104:8008"
+scrum_master-01: "http://192.168.1.105:8009"
+security-01: "http://192.168.1.105:8010"

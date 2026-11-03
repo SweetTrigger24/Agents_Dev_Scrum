@@ -204,6 +204,8 @@ PORT=                        # bắt buộc, không có giá trị mặc định
 CONTRACT_MIN_VERSION=1.0.0
 AGENT_ID=pm-01
 AGENT_ROLE=PM
+AGENT_API_KEY=               # bắt buộc nếu HOST != 127.0.0.1
+MAX_UPLOAD_MB=10             # giới hạn dung lượng tải file artifact lên (mặc định 10MB)
 LLM_PROVIDER=groq            # groq | gemini | openrouter | ollama | openai | custom
 LLM_MODEL=llama-3.3-70b-versatile
 LLM_API_KEY=
@@ -226,3 +228,25 @@ DRY_RUN=true
 5. Agent **không gọi agent khác**; chỉ gợi ý qua `next_actions`.
 6. Mọi lỗi trả về `AgentError`; agent không được ném exception ra ngoài `handle()`.
 7. Mỗi agent có unit test, README, `.env.example`, demo script.
+
+## 2.8 Agent API v1
+
+Mô hình triển khai: mỗi agent chạy trên một máy riêng, các máy gọi nhau qua mạng LAN bằng HTTP. Monorepo chỉ là cách chia sẻ mã nguồn; lúc chạy, máy nào chỉ khởi động agent của máy đó. Không có thư mục dùng chung giữa các máy, artifact đi qua API của agent.
+
+Bảng endpoint tiêu chuẩn:
+
+| Endpoint | Xác thực | Mô tả |
+| --- | --- | --- |
+| `GET /health` | Không | Trả về `{status, agent_id, role, contract_version, agent_version}` |
+| `GET /agent` | Bearer Token | Trả về `AgentIdentity` của agent |
+| `GET /state` | Bearer Token | Trả về `AgentState` hiện thời của agent |
+| `POST /tasks` | Bearer Token | Nhận `TaskRequest`, trả `TaskResult` (đồng bộ, áp `timeout_seconds`, idempotent theo `task_id`, concurrency lock: trả 409 nếu đang bận) |
+| `GET /tasks/{task_id}` | Bearer Token | Trả `TaskResult` đã lưu từ `data/results/<task_id>.json` hoặc 404 |
+| `GET /artifacts` | Bearer Token | Trả danh sách `list[ArtifactRef]` của agent |
+| `GET /artifacts/{artifact_id}/content` | Bearer Token | Tải nội dung file artifact, kèm header `X-Checksum-SHA256`, chặn path traversal |
+| `POST /artifacts/inbox` | Bearer Token | Multipart form (`metadata`: JSON ArtifactRef, `file`: binary), kiểm tra sha256 và `MAX_UPLOAD_MB`, ghi vào `artifacts/inbox/<origin_agent_id>/` |
+
+**Quy tắc bảo mật và xác thực:**
+- Mọi endpoint trừ `GET /health` bắt buộc phải có header `Authorization: Bearer <AGENT_API_KEY>`.
+- Token được kiểm tra bằng hàm an toàn `hmac.compare_digest`. Nếu sai hoặc thiếu token, trả HTTP 401 Unauthorized và **tuyệt đối không ghi token vào log**.
+

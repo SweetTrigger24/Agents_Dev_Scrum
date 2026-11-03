@@ -234,23 +234,35 @@ class TestEdgeCasesAndValidation:
 
 
 class TestPMAgentAPI:
-    """Kiểm thử FastAPI endpoints của PM Agent."""
+    """Kiểm thử FastAPI endpoints của PM Agent tuân thủ Agent API v1."""
 
     def test_api_endpoints(self):
+        api_config = app.state.config
         client = TestClient(app)
+        auth_headers = {"Authorization": f"Bearer {api_config.agent_api_key}"}
 
+        # 1. /health không cần token
         res_health = client.get("/health")
         assert res_health.status_code == 200
         assert res_health.json()["role"] == "PM"
 
-        res_agent = client.get("/agent")
+        # 2. Endpoint yêu cầu token: thiếu token trả 401
+        res_unauth = client.get("/agent")
+        assert res_unauth.status_code == 401
+
+        res_bad_token = client.get("/agent", headers={"Authorization": "Bearer sai-token-xyz"})
+        assert res_bad_token.status_code == 401
+
+        # 3. Có token hợp lệ trả 200
+        res_agent = client.get("/agent", headers=auth_headers)
         assert res_agent.status_code == 200
         assert res_agent.json()["agent_id"] == "pm-01"
 
-        res_state = client.get("/state")
+        res_state = client.get("/state", headers=auth_headers)
         assert res_state.status_code == 200
         assert res_state.json()["status"] == "IDLE"
 
+        # 4. POST /tasks
         task_payload = {
             "contract_version": "1.0.0",
             "task_id": "TASK-API-PM",
@@ -263,6 +275,16 @@ class TestPMAgentAPI:
             "input_artifacts": [],
             "constraints": {"deadline": None, "priority": "MEDIUM", "timeout_seconds": 60},
         }
-        res_task = client.post("/tasks", json=task_payload)
+        res_task = client.post("/tasks", json=task_payload, headers=auth_headers)
         assert res_task.status_code == 200
         assert res_task.json()["status"] == "COMPLETED"
+
+        # 5. GET /tasks/{task_id} trả lại TaskResult đã lưu
+        res_get_task = client.get("/tasks/TASK-API-PM", headers=auth_headers)
+        assert res_get_task.status_code == 200
+        assert res_get_task.json()["task_id"] == "TASK-API-PM"
+
+        # 6. GET /artifacts trả danh sách
+        res_artifacts = client.get("/artifacts", headers=auth_headers)
+        assert res_artifacts.status_code == 200
+        assert isinstance(res_artifacts.json(), list)
