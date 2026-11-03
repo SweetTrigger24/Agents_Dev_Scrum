@@ -42,6 +42,9 @@ from schemas import (
     TaskItem,
     TrackProgressOutput,
 )
+from conductor.dispatcher import find_agent_id_for_role, load_endpoints, send_task_request
+from conductor.orchestrator import ConductorOrchestrator
+from conductor.state import ProjectState, ProjectStatus, StepStatus, load_project_state
 from tools.artifact import ArtifactError, list_artifacts, read_artifact, save_artifact
 from tools.plan import create_plan
 from tools.task import (
@@ -356,6 +359,13 @@ class PMAgent(BaseAgent):
             status=AgentStatus.IDLE,
         )
         super().__init__(identity=identity, config=cfg, llm=llm)
+        self.conductor = ConductorOrchestrator(
+            data_dir=self.config.data_dir,
+            artifact_dir=self.config.artifact_dir,
+            config=self.config,
+            llm_client=self.llm,
+            agent_identity=self.identity,
+        )
 
     # -------------------------------------------------------------------------
     # Action 1: analyze_requirement (Capability: project_planning)
@@ -816,3 +826,127 @@ class PMAgent(BaseAgent):
             ],
             error=None,
         )
+
+    # -------------------------------------------------------------------------
+    # Action 7: start_project (Capability: workflow_orchestration)
+    # -------------------------------------------------------------------------
+    @action("start_project", capability="workflow_orchestration")
+    def handle_start_project(self, request: TaskRequest) -> TaskResult:
+        """Khởi động quy trình phần mềm tự động bằng PM Conductor theo software_delivery.yaml."""
+        brief = request.context.get("brief") or request.instruction
+        auto_approve = bool(request.context.get("auto_approve", self.config.pm_auto_approve))
+        project_id = request.project_id or f"PROJ-{int(time.time())}"
+
+        state = self.conductor.init_project(
+            project_id=project_id,
+            brief=brief,
+            auto_approve=auto_approve,
+        )
+        is_async = bool(request.context.get("async", False))
+        if not is_async:
+            state = self.conductor.run_pipeline(state)
+
+        status_enum = (
+            TaskStatus.COMPLETED if state.status == ProjectStatus.COMPLETED
+            else (TaskStatus.BLOCKED if state.status == ProjectStatus.BLOCKED else TaskStatus.RUNNING)
+        )
+
+        return TaskResult(
+            contract_version=request.contract_version,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            status=status_enum,
+            summary=f"Dự án {project_id} ở trạng thái {state.status.value}.",
+            outputs=[state.model_dump(mode="json")],
+            artifacts=[],
+            error=make_error(code=ErrorCode.UNKNOWN_ERROR, message=state.block_reason or "") if state.status == ProjectStatus.BLOCKED else None,
+        )
+
+    # -------------------------------------------------------------------------
+    # Action 8: resume_project (Capability: workflow_orchestration)
+    # -------------------------------------------------------------------------
+    @action("resume_project", capability="workflow_orchestration")
+    def handle_resume_project(self, request: TaskRequest) -> TaskResult:
+        """Tiếp tục quy trình phần mềm tự động từ bước dở dang."""
+        project_id = request.context.get("project_id") or request.project_id
+        state = self.conductor.resume_project(project_id)
+        status_enum = (
+            TaskStatus.COMPLETED if state.status == ProjectStatus.COMPLETED
+            else (TaskStatus.BLOCKED if state.status == ProjectStatus.BLOCKED else TaskStatus.RUNNING)
+        )
+        return TaskResult(
+            contract_version=request.contract_version,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            status=status_enum,
+            summary=f"Dự án {project_id} được tiếp tục, trạng thái: {state.status.value}.",
+            outputs=[state.model_dump(mode="json")],
+            artifacts=[],
+            error=make_error(code=ErrorCode.UNKNOWN_ERROR, message=state.block_reason or "") if state.status == ProjectStatus.BLOCKED else None,
+        )
+
+    # -------------------------------------------------------------------------
+    # Action 9: get_project_state (Capability: workflow_orchestration)
+    # -------------------------------------------------------------------------
+    @action("get_project_state", capability="workflow_orchestration")
+    def handle_get_project_state(self, request: TaskRequest) -> TaskResult:
+        """Lấy trạng thái chi tiết của một dự án do PM Conductor quản lý."""
+        project_id = request.context.get("project_id") or request.project_id
+        state = load_project_state(project_id, self.config.data_dir)
+        if not state:
+            return failed_result(
+                request,
+                make_error(code=ErrorCode.INVALID_INPUT, message=f"Không tìm thấy dự án {project_id}"),
+                summary="Dự án không tồn tại.",
+            )
+        return TaskResult(
+            contract_version=request.contract_version,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            status=TaskStatus.COMPLETED,
+            summary=f"Trạng thái dự án {project_id}: {state.status.value}.",
+            outputs=[state.model_dump(mode="json")],
+            artifacts=[],
+        )
+
+    # -------------------------------------------------------------------------
+    # Action 10: dispatch_task (Capability: task_dispatch)
+    # -------------------------------------------------------------------------
+    @action("dispatch_task", capability="task_dispatch")
+    def handle_dispatch_task(self, request: TaskRequest) -> TaskResult:
+        """PM trực tiếp gửi một TaskRequest tới agent khác qua LAN và trả lại TaskResult."""
+        target_agent_id = request.context.get("target_agent_id")
+        target_role = request.context.get("target_role")
+        endpoints = load_endpoints()
+        if not target_agent_id:
+            if target_role:
+                target_agent_id = find_agent_id_for_role(target_role, endpoints)
+            else:
+                return failed_result(
+                    request,
+                    make_error(code=ErrorCode.INVALID_INPUT, message="Thiếu target_agent_id hoặc target_role trong context."),
+                    summary="Thiếu thông tin agent đích.",
+                )
+        sub_req = TaskRequest(
+            contract_version=request.contract_version,
+            task_id=request.context.get("dispatch_task_id") or f"TASK-DISPATCH-{int(time.time())}",
+            project_id=request.project_id,
+            agent_id=target_agent_id,
+            role=AgentRole(target_role) if target_role else AgentRole.PM,
+            action=request.context.get("target_action", "unknown"),
+            instruction=request.instruction,
+            context=request.context.get("target_context", {}),
+            constraints=request.constraints,
+        )
+        res = send_task_request(target_agent_id, sub_req, endpoints)
+        return TaskResult(
+            contract_version=request.contract_version,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            status=res.status,
+            summary=f"Đã dispatch tới {target_agent_id}: {res.summary}",
+            outputs=res.outputs,
+            artifacts=res.artifacts,
+            error=res.error,
+        )
+

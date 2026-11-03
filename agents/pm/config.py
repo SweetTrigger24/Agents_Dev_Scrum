@@ -65,7 +65,14 @@ class PMConfig(BaseSettings):
     port: int | None = None
     contract_min_version: str = "1.0.0"
     agent_api_key: str = ""
-    max_upload_mb: int = 10
+    max_upload_mb: int = 50
+
+    # Cấu hình Conductor / Tự động hóa dự án (v1.1.0)
+    pm_auto_approve: bool = False
+    pm_allow_real_deploy: bool = False
+    max_fix_loops: int = 3
+    max_tasks_per_project: int = 60
+    project_timeout_minutes: int = 240
 
     agent_id: str = "pm-01"
     agent_role: AgentRole = AgentRole.PM

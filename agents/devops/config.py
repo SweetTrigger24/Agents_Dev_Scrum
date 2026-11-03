@@ -65,7 +65,7 @@ class DevOpsConfig(BaseSettings):
     port: int | None = None
     contract_min_version: str = "1.0.0"
     agent_api_key: str = ""
-    max_upload_mb: int = 10
+    max_upload_mb: int = 50
 
     agent_id: str = "devops-01"
     agent_role: AgentRole = AgentRole.DEVOPS

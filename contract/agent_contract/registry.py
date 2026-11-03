@@ -6,6 +6,8 @@ CAPABILITY_REGISTRY: dict[AgentRole, list[str]] = {
         "task_decomposition",
         "task_assignment",
         "progress_tracking",
+        "task_dispatch",
+        "workflow_orchestration",
     ],
     AgentRole.BA: [
         "requirement_analysis",
@@ -72,6 +74,10 @@ ACTION_MAP: dict[AgentRole, dict[str, str]] = {
         "assign_tasks": "task_assignment",
         "track_progress": "progress_tracking",
         "report_status": "progress_tracking",
+        "start_project": "workflow_orchestration",
+        "resume_project": "workflow_orchestration",
+        "get_project_state": "workflow_orchestration",
+        "dispatch_task": "task_dispatch",
     },
     AgentRole.DEVOPS: {
         "git_operation": "git",
@@ -82,20 +88,33 @@ ACTION_MAP: dict[AgentRole, dict[str, str]] = {
         "health_check": "health_check",
         "setup_monitoring": "monitoring",
     },
-    # TODO: BA - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.BA: {},
-    # TODO: SA - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.SA: {},
-    # TODO: DBA - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.DBA: {},
-    # TODO: DEV - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.DEV: {},
-    # TODO: TESTER - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.TESTER: {},
-    # TODO: SECURITY - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.SECURITY: {},
-    # TODO: PO - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.PO: {},
-    # TODO: SCRUM_MASTER - 4 thành viên còn lại tự định nghĩa action theo mẫu bảng và gửi duyệt để gộp vào registry
-    AgentRole.SCRUM_MASTER: {},
+    AgentRole.PO: {
+        "define_backlog": "backlog_management",
+        "accept_release": "acceptance",
+    },
+    AgentRole.BA: {
+        "write_requirements": "requirement_analysis",
+        "write_user_stories": "user_story",
+    },
+    AgentRole.SA: {
+        "design_architecture": "system_architecture",
+    },
+    AgentRole.DBA: {
+        "design_schema": "schema_design",
+    },
+    AgentRole.DEV: {
+        "implement_project": "coding",
+        "fix_bugs": "bug_fixing",
+    },
+    AgentRole.TESTER: {
+        "create_test_cases": "test_case_generation",
+        "run_test_suite": "automated_testing",
+    },
+    AgentRole.SECURITY: {
+        "security_review": "security_review",
+    },
+    AgentRole.SCRUM_MASTER: {
+        "track_blockers": "blocker_tracking",
+        "run_retrospective": "retrospective",
+    },
 }

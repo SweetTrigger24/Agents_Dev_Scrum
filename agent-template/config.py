@@ -67,7 +67,7 @@ class AgentConfig(BaseSettings):
     port: int | None = None
     contract_min_version: str = "1.0.0"
     agent_api_key: str = ""
-    max_upload_mb: int = 10
+    max_upload_mb: int = 50
 
     # Định danh Agent và cấu hình LLM
     agent_id: str = "pm-01"

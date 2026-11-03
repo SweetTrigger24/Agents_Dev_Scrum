@@ -1,3 +1,39 @@
+
+def print_project_table(state: ProjectState) -> None:
+    header = f"{'STT':<4} | {'BƯỚC':<26} | {'ROLE':<8} | {'ACTION/GATE':<24} | {'STATUS':<16} | {'TRY':<4} | {'ARTIFACTS'}"
+    sep = "-" * len(header)
+    print("\n" + "=" * len(header))
+    print(f"DỰ ÁN: {state.project_id} | TRẠNG THÁI: {state.status.value.upper()} | TASKS: {state.tasks_used} | FIX LOOPS: {state.fix_loops_used}")
+    if state.waiting_gate:
+        print(f"⏳ ĐANG CHỜ DUYỆT CỔNG: {state.waiting_gate} (Lệnh duyệt: python -m cli project approve {state.project_id} --gate {state.waiting_gate})")
+    if state.block_reason:
+        print(f"⚠️  LÝ DO BỊ CHẶN: {state.block_reason}")
+    if state.missing_questions:
+        print("❓ CÁC CÂU HỎI LÀM RÕ CẦN NGƯỜI DÙNG:")
+        for q in state.missing_questions:
+            print(f"   • {q}")
+    print("=" * len(header))
+    print(header)
+    print(sep)
+
+    for idx, (sid, step) in enumerate(state.steps.items(), 1):
+        role_disp = step.role or "-"
+        act_disp = step.action or (f"[GATE: {step.gate}]" if step.gate else "-")
+        stat_disp = step.status.value.upper()
+        arts_disp = ", ".join(a.name for a in step.artifacts) if step.artifacts else "-"
+        print(f"{idx:<4} | {sid:<26} | {role_disp:<8} | {act_disp:<24} | {stat_disp:<16} | {step.attempts:<4} | {arts_disp}")
+
+    print("=" * len(header) + "\n")
+
+import time
+from conductor.state import (
+    ProjectState,
+    ProjectStatus,
+    StepStatus,
+    list_all_projects,
+    load_project_state,
+    save_project_state,
+)
 import argparse
 import io
 import sys
@@ -44,6 +80,40 @@ def main() -> None:
     # 4. Chế độ chat tương tác liên tục
     chat_parser = subparsers.add_parser("chat", help="Mở phiên chat tương tác trực tiếp với PM Agent")
     chat_parser.add_argument("--mock", action="store_true", help="Chạy ở chế độ Mock LLM")
+
+    
+    # 5. Lệnh quản lý project (Conductor)
+    proj_parser = subparsers.add_parser("project", help="Quản lý và điều phối quy trình phân phối phần mềm (PM Conductor)")
+    proj_sub = proj_parser.add_subparsers(dest="proj_command", required=True)
+
+    # start
+    p_start = proj_sub.add_parser("start", help="Khởi động dự án phần mềm tự động")
+    p_start.add_argument("--brief-file", required=True, type=str, help="Đường dẫn file brief dự án (Markdown/Text)")
+    p_start.add_argument("--auto-approve", action="store_true", help="Tự động duyệt qua các cổng kiểm soát")
+    p_start.add_argument("--allow-real-deploy", action="store_true", help="Cho phép triển khai thật (context.execute=true)")
+    p_start.add_argument("--mock", action="store_true", help="Chạy ở chế độ Mock LLM")
+
+    # status
+    p_status = proj_sub.add_parser("status", help="Xem trạng thái chi tiết của dự án")
+    p_status.add_argument("project_id", type=str, help="Mã dự án (project_id)")
+    p_status.add_argument("--watch", action="store_true", help="Theo dõi trạng thái liên tục theo thời gian thực")
+
+    # approve
+    p_approve = proj_sub.add_parser("approve", help="Phê duyệt thủ công cổng kiểm soát")
+    p_approve.add_argument("project_id", type=str, help="Mã dự án (project_id)")
+    p_approve.add_argument("--gate", required=True, choices=["approve_scope", "approve_deploy"], help="Tên cổng kiểm soát")
+
+    # resume
+    p_resume = proj_sub.add_parser("resume", help="Tiếp tục chạy dự án từ bước dở dang")
+    p_resume.add_argument("project_id", type=str, help="Mã dự án (project_id)")
+
+    # abort
+    p_abort = proj_sub.add_parser("abort", help="Hủy bỏ dự án đang chạy")
+    p_abort.add_argument("project_id", type=str, help="Mã dự án (project_id)")
+
+    # list
+    proj_sub.add_parser("list", help="Liệt kê danh sách các dự án")
+
 
     args = parser.parse_args()
     config = PMConfig()
@@ -178,6 +248,94 @@ def main() -> None:
                 for na in result.next_actions:
                     print(f"   • [{na.suggested_role.value}] {na.action}: {na.reason}")
             counter += 1
+
+
+
+    elif args.command == "project":
+        use_mock = getattr(args, "mock", False) or not bool(config.llm_api_key.strip())
+        llm = LLMClient(config=config, mock=use_mock)
+        agent = PMAgent(config=config, llm=llm)
+
+        if args.proj_command == "start":
+            brief_path = Path(args.brief_file)
+            if not brief_path.exists():
+                print(f"Lỗi: Không tìm thấy file brief tại '{brief_path}'", file=sys.stderr)
+                sys.exit(1)
+            brief_content = brief_path.read_text(encoding="utf-8")
+            proj_id = f"PROJ-{int(time.time())}"
+            print(f"[*] Khởi động dự án mới: {proj_id}")
+            state = agent.conductor.init_project(
+                project_id=proj_id,
+                brief=brief_content,
+                auto_approve=args.auto_approve,
+            )
+            state.allow_real_deploy = args.allow_real_deploy
+            save_project_state(state, config.data_dir)
+            print(f"[*] Bắt đầu thực thi pipeline software_delivery...")
+            final_state = agent.conductor.run_pipeline(state)
+            print_project_table(final_state)
+
+        elif args.proj_command == "status":
+            state = load_project_state(args.project_id, config.data_dir)
+            if not state:
+                print(f"Lỗi: Không tìm thấy dự án '{args.project_id}'", file=sys.stderr)
+                sys.exit(1)
+            print_project_table(state)
+            if args.watch:
+                print("[*] Đang theo dõi trạng thái dự án (Nhấn Ctrl+C để dừng)...")
+                try:
+                    while True:
+                        time.sleep(2.0)
+                        s = load_project_state(args.project_id, config.data_dir)
+                        if s:
+                            print_project_table(s)
+                            if s.status in [ProjectStatus.COMPLETED, ProjectStatus.BLOCKED, ProjectStatus.ABORTED]:
+                                print(f"[*] Dự án đã kết thúc ở trạng thái: {s.status.value}")
+                                break
+                except KeyboardInterrupt:
+                    print("\n[*] Dừng theo dõi.")
+
+        elif args.proj_command == "approve":
+            state = load_project_state(args.project_id, config.data_dir)
+            if not state:
+                print(f"Lỗi: Không tìm thấy dự án '{args.project_id}'", file=sys.stderr)
+                sys.exit(1)
+            print(f"[*] Đang phê duyệt cổng '{args.gate}' cho dự án {args.project_id}...")
+            final_state = agent.conductor.approve_gate(project_id=args.project_id, gate_name=args.gate)
+            print_project_table(final_state)
+
+        elif args.proj_command == "resume":
+            state = load_project_state(args.project_id, config.data_dir)
+            if not state:
+                print(f"Lỗi: Không tìm thấy dự án '{args.project_id}'", file=sys.stderr)
+                sys.exit(1)
+            print(f"[*] Tiếp tục chạy dự án {args.project_id}...")
+            final_state = agent.conductor.resume_project(project_id=args.project_id)
+            print_project_table(final_state)
+
+        elif args.proj_command == "abort":
+            state = load_project_state(args.project_id, config.data_dir)
+            if not state:
+                print(f"Lỗi: Không tìm thấy dự án '{args.project_id}'", file=sys.stderr)
+                sys.exit(1)
+            state.status = ProjectStatus.ABORTED
+            state.block_reason = "Dự án bị hủy bỏ bởi người quản trị qua CLI."
+            save_project_state(state, config.data_dir)
+            print(f"[*] Đã hủy dự án {args.project_id}.")
+            print_project_table(state)
+
+        elif args.proj_command == "list":
+            projects = list_all_projects(config.data_dir)
+            if not projects:
+                print("Chưa có dự án nào được tạo.")
+            else:
+                print(f"\n{'STT':<4} | {'PROJECT ID':<20} | {'TRẠNG THÁI':<16} | {'BƯỚC HIỆN TẠI':<24} | {'NGÀY TẠO'}")
+                print("-" * 80)
+                for i, p in enumerate(projects, 1):
+                    created = p.created_at.strftime("%Y-%m-%d %H:%M:%S") if p.created_at else "-"
+                    cur = p.current_step_id or "-"
+                    print(f"{i:<4} | {p.project_id:<20} | {p.status.value:<16} | {cur:<24} | {created}")
+                print("-" * 80 + "\n")
 
 
 if __name__ == "__main__":

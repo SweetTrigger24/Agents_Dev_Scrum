@@ -1,3 +1,4 @@
+from typing import Any
 import asyncio
 import hashlib
 import hmac
@@ -366,3 +367,162 @@ async def receive_artifact_inbox(
         f.write("\n")
 
     return saved_ref
+
+import threading
+from pydantic import BaseModel
+from conductor.state import (
+    ProjectState,
+    ProjectStatus,
+    StepStatus,
+    append_project_event,
+    list_all_projects,
+    load_project_state,
+    save_project_state,
+)
+
+
+class CreateProjectBody(BaseModel):
+    brief: str
+    auto_approve: bool = False
+    allow_real_deploy: bool = False
+    project_id: str | None = None
+
+
+class ApproveGateBody(BaseModel):
+    gate: str
+
+
+# -----------------------------------------------------------------------------
+# 5. Endpoints Quản lý Dự án & Conductor Orchestration
+# -----------------------------------------------------------------------------
+@app.post("/projects", summary="Tạo mới và khởi chạy dự án tự động trong background thread")
+def create_project(body: CreateProjectBody, token: str = Depends(verify_bearer_token)) -> dict[str, Any]:
+    project_id = body.project_id or f"PROJ-{int(time.time())}"
+    state = agent_instance.conductor.init_project(
+        project_id=project_id,
+        brief=body.brief,
+        auto_approve=body.auto_approve,
+    )
+    state.allow_real_deploy = body.allow_real_deploy
+    save_project_state(state, config.data_dir)
+
+    def _worker():
+        try:
+            agent_instance.conductor.run_pipeline(state)
+        except Exception as err:
+            logger.exception(f"Lỗi worker background chạy project {project_id}: {err}")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    return {
+        "project_id": project_id,
+        "status": "CREATED",
+        "message": f"Dự án {project_id} đã được khởi tạo và đang chạy ngầm.",
+    }
+
+
+@app.get("/projects", summary="Lấy danh sách các dự án")
+def get_projects(token: str = Depends(verify_bearer_token)) -> list[dict[str, Any]]:
+    projects = list_all_projects(config.data_dir)
+    return [
+        {
+            "project_id": p.project_id,
+            "status": p.status.value,
+            "current_step": p.current_step_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in projects
+    ]
+
+
+@app.get("/projects/{project_id}", summary="Lấy chi tiết trạng thái ProjectState của một dự án")
+def get_project_detail(project_id: str, token: str = Depends(verify_bearer_token)) -> dict[str, Any]:
+    state = load_project_state(project_id, config.data_dir)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy dự án có mã '{project_id}'",
+        )
+    return state.model_dump(mode="json")
+
+
+@app.post("/projects/{project_id}/approve", summary="Phê duyệt thủ công cổng kiểm soát và tiếp tục chạy ngầm")
+def approve_project_gate(
+    project_id: str,
+    body: ApproveGateBody,
+    token: str = Depends(verify_bearer_token),
+) -> dict[str, Any]:
+    state = load_project_state(project_id, config.data_dir)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy dự án có mã '{project_id}'",
+        )
+    if body.gate not in ["approve_scope", "approve_deploy"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cổng '{body.gate}' không hợp lệ (hỗ trợ: approve_scope, approve_deploy)",
+        )
+
+    def _worker():
+        try:
+            agent_instance.conductor.approve_gate(project_id=project_id, gate_name=body.gate)
+        except Exception as err:
+            logger.exception(f"Lỗi worker approve gate {body.gate} cho {project_id}: {err}")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    return {
+        "project_id": project_id,
+        "gate": body.gate,
+        "status": "APPROVED",
+        "message": f"Đã duyệt cổng '{body.gate}' cho dự án {project_id} và tiếp tục chạy ngầm.",
+    }
+
+
+@app.post("/projects/{project_id}/resume", summary="Tiếp tục chạy ngầm bước dở dang của dự án")
+def resume_project_api(project_id: str, token: str = Depends(verify_bearer_token)) -> dict[str, Any]:
+    state = load_project_state(project_id, config.data_dir)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy dự án có mã '{project_id}'",
+        )
+
+    def _worker():
+        try:
+            agent_instance.conductor.resume_project(project_id=project_id)
+        except Exception as err:
+            logger.exception(f"Lỗi worker resume project {project_id}: {err}")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    return {
+        "project_id": project_id,
+        "status": "RESUMED",
+        "message": f"Dự án {project_id} đang tiếp tục chạy ngầm.",
+    }
+
+
+@app.post("/projects/{project_id}/abort", summary="Chuyển trạng thái dự án thành ABORTED và dừng các bước tiếp theo")
+def abort_project_api(project_id: str, token: str = Depends(verify_bearer_token)) -> dict[str, Any]:
+    state = load_project_state(project_id, config.data_dir)
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy dự án có mã '{project_id}'",
+        )
+    state.status = ProjectStatus.ABORTED
+    state.block_reason = "Dự án bị hủy bởi yêu cầu POST /projects/{project_id}/abort."
+    save_project_state(state, config.data_dir)
+    append_project_event(project_id, "PROJECT_ABORTED", {"aborted_via": "API"}, config.data_dir)
+
+    return {
+        "project_id": project_id,
+        "status": "ABORTED",
+        "message": f"Dự án {project_id} đã được chuyển sang trạng thái ABORTED.",
+    }
+

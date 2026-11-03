@@ -25,8 +25,8 @@ def test_capabilities_are_mutually_exclusive_across_roles():
 
 def test_action_map_for_pm_and_devops():
     """Kiểm tra ACTION_MAP của PM và DevOps ánh xạ đúng tới capability của role đó."""
-    # PM: 6 actions
-    assert len(ACTION_MAP[AgentRole.PM]) == 6
+    # PM: 10 actions (6 ban đầu + 4 cho workflow/dispatch ở v1.1.0)
+    assert len(ACTION_MAP[AgentRole.PM]) == 10
     for action, cap in ACTION_MAP[AgentRole.PM].items():
         assert cap in CAPABILITY_REGISTRY[AgentRole.PM], (
             f"Action '{action}' của PM ánh xạ tới capability '{cap}' không có trong registry"
@@ -40,18 +40,12 @@ def test_action_map_for_pm_and_devops():
         )
 
 
-def test_other_roles_have_empty_action_maps_with_todo():
-    """Kiểm tra 8 role còn lại có key trong ACTION_MAP và mang giá trị dict rỗng."""
-    other_roles = [
-        AgentRole.BA,
-        AgentRole.SA,
-        AgentRole.DBA,
-        AgentRole.DEV,
-        AgentRole.TESTER,
-        AgentRole.SECURITY,
-        AgentRole.PO,
-        AgentRole.SCRUM_MASTER,
-    ]
-    for role in other_roles:
-        assert role in ACTION_MAP
-        assert ACTION_MAP[role] == {}, f"Role {role} phải có action map rỗng khi chưa được định nghĩa"
+def test_pipeline_actions_registered_for_all_roles():
+    """Kiểm tra tất cả 10 role đều có pipeline actions trong ACTION_MAP và khớp registry (v1.1.0)."""
+    assert len(ACTION_MAP) == 10
+    for role, actions in ACTION_MAP.items():
+        assert len(actions) > 0, f"Role {role.value} phải có ít nhất 1 action được đăng ký trong ACTION_MAP."
+        for action, cap in actions.items():
+            assert cap in CAPABILITY_REGISTRY[role], (
+                f"Action '{action}' của {role.value} ánh xạ tới capability '{cap}' không có trong CAPABILITY_REGISTRY."
+            )

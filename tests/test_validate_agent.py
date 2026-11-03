@@ -86,6 +86,27 @@ class TestValidateAgentExtensions:
         assert summary.passed is False
         assert "Phát hiện truy cập agent khác" in summary.checks[-1].message
 
+    def test_d3_conductor_allowed_for_pm(self, tmp_path):
+        """D3 PASS: Duy nhất PM được phép import và sử dụng module conductor."""
+        agent_dir = tmp_path / "pm"
+        agent_dir.mkdir()
+        (agent_dir / "service.py").write_text("from conductor.dispatcher import dispatch_step\n", encoding="utf-8")
+
+        summary = AgentValidationSummary(agent_dir="pm")
+        check_d3_no_inter_agent_access(agent_dir, summary)
+        assert summary.passed is True
+
+    def test_d3_conductor_forbidden_for_non_pm(self, tmp_path):
+        """D3 FAIL: Agent không phải PM cấm import conductor."""
+        agent_dir = tmp_path / "devops"
+        agent_dir.mkdir()
+        (agent_dir / "service.py").write_text("from conductor.dispatcher import dispatch_step\n", encoding="utf-8")
+
+        summary = AgentValidationSummary(agent_dir="devops")
+        check_d3_no_inter_agent_access(agent_dir, summary)
+        assert summary.passed is False
+        assert "cấm from 'conductor.dispatcher' import" in summary.checks[-1].message
+
     # 4. Port Uniqueness & Alignment
     def test_d4_port_uniqueness_pass(self, tmp_path):
         """D4 PASS: Port trong .env.example không trùng và khớp YAML."""

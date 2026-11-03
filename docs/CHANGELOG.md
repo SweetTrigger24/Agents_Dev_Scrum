@@ -2,6 +2,18 @@
 
 Tất cả các thay đổi về Agent Contract sẽ được ghi lại tại tài liệu này.
 
+## [1.1.0] - 2026-11-03
+### Nâng cấp Contract v1.1.0 (Prompt 8 - PM Conductor)
+- Nâng `CONTRACT_VERSION` từ `"1.0.0"` lên `"1.1.0"`. `CONTRACT_MIN_VERSION` của các agent giữ nguyên `"1.0.0"`.
+- Bổ sung capabilities cho PM: `task_dispatch`, `workflow_orchestration`.
+- Bổ sung actions cho PM: `start_project`, `resume_project`, `get_project_state` (workflow_orchestration) và `dispatch_task` (task_dispatch).
+- Đăng ký toàn bộ pipeline actions ở Bảng 2.9 vào `ACTION_MAP` và `CAPABILITY_REGISTRY` cho toàn bộ 10 Agent roles.
+- Bổ sung mục 2.9 "Pipeline actions" vào `docs/CONTRACT.md`:
+  - Quy ước verdict: `outputs[0]` của TESTER, SECURITY và PO có cấu trúc `{"verdict": "PASS" | "FAIL", "findings": [...]}`.
+  - Quy ước `SOURCE_CODE`: chuyển giao qua file nén `.zip`.
+- Tăng giới hạn `MAX_UPLOAD_MB` mặc định lên 50MB.
+- Ngoại lệ điều phối: Cho phép duy nhất PM import module `conductor` và gọi HTTP tới các agent khác. Các agent khác vẫn bị nghiêm cấm giao tiếp ngang hàng.
+
 ## [1.0.0] - 2026-11-03
 ### Bổ sung Agent API v1 (Prompt 7)
 - Thêm mục 2.8 "Agent API v1" vào `docs/CONTRACT.md`:

@@ -1,0 +1,167 @@
+name: software_delivery
+version: "1.1.0"
+description: "Quy trình phát triển và phân phối phần mềm chuẩn 10 Agent độc lập"
+
+steps:
+  - id: po_define_backlog
+    role: PO
+    action: define_backlog
+    depends_on: []
+    instruction_template: "Phân tích brief và xây dựng product backlog cho dự án: {brief}"
+    input_artifact_types: []
+    expected_artifact_types: [BACKLOG]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: ba_write_requirements
+    role: BA
+    action: write_requirements
+    depends_on: [po_define_backlog]
+    instruction_template: "Dựa trên product backlog, viết đặc tả yêu cầu chi tiết (SRS): {summary_previous}"
+    input_artifact_types: [BACKLOG]
+    expected_artifact_types: [REQUIREMENT]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: ba_write_user_stories
+    role: BA
+    action: write_user_stories
+    depends_on: [ba_write_requirements]
+    instruction_template: "Chuyển đổi yêu cầu thành danh sách user stories chi tiết kèm acceptance criteria: {summary_previous}"
+    input_artifact_types: [REQUIREMENT]
+    expected_artifact_types: [USER_STORY]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: gate_approve_scope
+    gate: approve_scope
+    depends_on: [ba_write_user_stories]
+    description: "Cổng phê duyệt phạm vi dự án trước khi thiết kế kiến trúc"
+
+  - id: sa_design_architecture
+    role: SA
+    action: design_architecture
+    depends_on: [gate_approve_scope]
+    instruction_template: "Thiết kế kiến trúc hệ thống và lựa chọn công nghệ phù hợp: {summary_previous}"
+    input_artifact_types: [REQUIREMENT, USER_STORY]
+    expected_artifact_types: [ARCHITECTURE]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: dba_design_schema
+    role: DBA
+    action: design_schema
+    depends_on: [sa_design_architecture]
+    instruction_template: "Thiết kế schema cơ sở dữ liệu và câu lệnh DDL theo kiến trúc: {summary_previous}"
+    input_artifact_types: [ARCHITECTURE, REQUIREMENT]
+    expected_artifact_types: [DATABASE_SCHEMA]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: tester_create_test_cases
+    role: TESTER
+    action: create_test_cases
+    depends_on: [ba_write_user_stories]
+    instruction_template: "Xây dựng bộ test cases kiểm thử tự động và thủ công: {summary_previous}"
+    input_artifact_types: [USER_STORY]
+    expected_artifact_types: [TEST_CASE]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: dev_implement_project
+    role: DEV
+    action: implement_project
+    depends_on: [sa_design_architecture, dba_design_schema, tester_create_test_cases]
+    instruction_template: "Lập trình toàn bộ dự án và đóng gói mã nguồn SOURCE_CODE (.zip): {summary_previous}"
+    input_artifact_types: [ARCHITECTURE, DATABASE_SCHEMA, USER_STORY]
+    expected_artifact_types: [SOURCE_CODE]
+    max_retries: 2
+    timeout_seconds: 180
+
+  - id: tester_run_test_suite
+    role: TESTER
+    action: run_test_suite
+    depends_on: [dev_implement_project]
+    instruction_template: "Chạy automated test suite trên mã nguồn và xuất báo cáo verdict: {summary_previous}"
+    input_artifact_types: [SOURCE_CODE, TEST_CASE]
+    expected_artifact_types: [TEST_REPORT]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: security_review
+    role: SECURITY
+    action: security_review
+    depends_on: [tester_run_test_suite]
+    instruction_template: "Rà soát lỗ hổng bảo mật và xuất security report verdict: {summary_previous}"
+    input_artifact_types: [SOURCE_CODE, ARCHITECTURE]
+    expected_artifact_types: [SECURITY_REPORT]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: devops_generate_ci_config
+    role: DEVOPS
+    action: generate_ci_config
+    depends_on: [security_review]
+    instruction_template: "Tạo cấu hình CI/CD pipeline cho dự án: {summary_previous}"
+    input_artifact_types: [SOURCE_CODE]
+    expected_artifact_types: [DEPLOYMENT]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: devops_build_image
+    role: DEVOPS
+    action: build_image
+    depends_on: [devops_generate_ci_config]
+    instruction_template: "Đóng gói Docker image cho hệ thống: {summary_previous}"
+    input_artifact_types: [SOURCE_CODE]
+    expected_artifact_types: [DEPLOYMENT]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: devops_deploy_staging
+    role: DEVOPS
+    action: deploy
+    depends_on: [devops_build_image]
+    instruction_template: "Triển khai lên môi trường staging (dry-run): {summary_previous}"
+    input_artifact_types: [SOURCE_CODE]
+    expected_artifact_types: [DEPLOYMENT]
+    context:
+      environment: staging
+      execute: false
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: gate_approve_deploy
+    gate: approve_deploy
+    depends_on: [devops_deploy_staging]
+    description: "Cổng phê duyệt triển khai môi trường production"
+
+  - id: devops_health_check
+    role: DEVOPS
+    action: health_check
+    depends_on: [gate_approve_deploy]
+    instruction_template: "Kiểm tra trạng thái sức khỏe dịch vụ: {summary_previous}"
+    input_artifact_types: []
+    expected_artifact_types: [DEPLOYMENT]
+    max_retries: 2
+    timeout_seconds: 60
+
+  - id: po_accept_release
+    role: PO
+    action: accept_release
+    depends_on: [devops_health_check]
+    instruction_template: "Đánh giá nghiệm thu sản phẩm và xác nhận phát hành: {summary_previous}"
+    input_artifact_types: [TEST_REPORT, DEPLOYMENT]
+    expected_artifact_types: [DOCUMENTATION]
+    max_retries: 2
+    timeout_seconds: 120
+
+  - id: sm_retrospective
+    role: SCRUM_MASTER
+    action: run_retrospective
+    depends_on: [po_accept_release]
+    instruction_template: "Tổ chức Sprint Retrospective và tổng kết kinh nghiệm: {summary_previous}"
+    input_artifact_types: []
+    expected_artifact_types: [DOCUMENTATION]
+    max_retries: 2
+    timeout_seconds: 120

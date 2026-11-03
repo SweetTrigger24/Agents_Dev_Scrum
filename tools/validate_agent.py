@@ -210,9 +210,12 @@ def check_d2_timezone_aware_datetime(agent_path: Path, summary: AgentValidationS
 
 
 def check_d3_no_inter_agent_access(agent_path: Path, summary: AgentValidationSummary) -> None:
-    """D.3 Kiểm tra agent không import hoặc đọc file thuộc agents/<tên khác>/."""
+    """D.3 Kiểm tra agent không import hoặc đọc file thuộc agents/<tên khác>/;
+    Chỉ DUY NHẤT agents/pm được import module conductor hoặc gọi HTTP tới agent khác (Prompt 8).
+    """
     violations = []
     current_agent_name = agent_path.name.lower()
+    is_pm = (current_agent_name == "pm")
 
     for py_file in agent_path.rglob("*.py"):
         try:
@@ -221,7 +224,18 @@ def check_d3_no_inter_agent_access(agent_path: Path, summary: AgentValidationSum
             continue
 
         for node in ast.walk(tree):
-            # Kiểm tra import agents.<tên khác>
+            # 1. Kiểm tra import module conductor đối với non-PM
+            if not is_pm:
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "conductor" or alias.name.startswith("conductor."):
+                            violations.append(f"{py_file.name}:{node.lineno} non-PM agent cấm import '{alias.name}'")
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    if mod == "conductor" or mod.startswith("conductor.") or "conductor" in mod.split("."):
+                        violations.append(f"{py_file.name}:{node.lineno} non-PM agent cấm from '{mod}' import ...")
+
+            # 2. Kiểm tra import agents.<tên khác>
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     mod = alias.name
@@ -244,7 +258,7 @@ def check_d3_no_inter_agent_access(agent_path: Path, summary: AgentValidationSum
                         target_agent = parts[1].split("/")[0]
                         if target_agent and target_agent != current_agent_name:
                             violations.append(f"{py_file.name}:{node.lineno} truy cập đường dẫn '{node.value}'")
-                elif any(x in val for x in ["http://localhost:800", "http://pm:", "http://devops:"]):
+                elif not is_pm and any(x in val for x in ["http://localhost:800", "http://pm:", "http://devops:"]):
                     violations.append(f"{py_file.name}:{node.lineno} gọi HTTP agent khác: '{node.value}'")
 
     if violations:
@@ -257,7 +271,7 @@ def check_d3_no_inter_agent_access(agent_path: Path, summary: AgentValidationSum
         summary.add_check(
             "Inter-Agent Isolation",
             True,
-            "Hoàn toàn độc lập, không import hoặc đọc file thuộc agent khác.",
+            "Hoàn toàn độc lập, không import hoặc đọc file thuộc agent khác (ngoại lệ conductor hợp lệ cho PM).",
         )
 
 

@@ -18,7 +18,7 @@ Ghi chú: `PLAN`, `BACKLOG`, `OTHER` là phần bổ sung so với danh sách g�
 ## 2.2 Các model
 
 ```python
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 class AgentIdentity(BaseModel):          # Agent tự khai báo
     contract_version: str = CONTRACT_VERSION
@@ -100,7 +100,7 @@ Mỗi `action` ánh xạ về đúng một `capability`. Agent nhận action kh�
 
 | Role | Capabilities |
 | --- | --- |
-| PM | `project_planning`, `task_decomposition`, `task_assignment`, `progress_tracking` |
+| PM | `project_planning`, `task_decomposition`, `task_assignment`, `progress_tracking`, `task_dispatch`, `workflow_orchestration` |
 | BA | `requirement_analysis`, `user_story`, `use_case`, `acceptance_criteria` |
 | SA | `system_architecture`, `api_design`, `technology_selection` |
 | DBA | `database_design`, `schema_design`, `sql`, `query_optimization` |
@@ -121,6 +121,10 @@ Mỗi `action` ánh xạ về đúng một `capability`. Agent nhận action kh�
 | `assign_tasks` | `task_assignment` |
 | `track_progress` | `progress_tracking` |
 | `report_status` | `progress_tracking` |
+| `start_project` | `workflow_orchestration` |
+| `resume_project` | `workflow_orchestration` |
+| `get_project_state` | `workflow_orchestration` |
+| `dispatch_task` | `task_dispatch` |
 
 **Action của DevOps**
 
@@ -205,7 +209,7 @@ CONTRACT_MIN_VERSION=1.0.0
 AGENT_ID=pm-01
 AGENT_ROLE=PM
 AGENT_API_KEY=               # bắt buộc nếu HOST != 127.0.0.1
-MAX_UPLOAD_MB=10             # giới hạn dung lượng tải file artifact lên (mặc định 10MB)
+MAX_UPLOAD_MB=50             # giới hạn dung lượng tải file artifact lên (mặc định 50MB)
 LLM_PROVIDER=groq            # groq | gemini | openrouter | ollama | openai | custom
 LLM_MODEL=llama-3.3-70b-versatile
 LLM_API_KEY=
@@ -225,7 +229,7 @@ DRY_RUN=true
 2. Không tự sửa protocol; muốn đổi phải tạo issue và tăng version.
 3. Không hard-code API key hay LLM provider; không commit `.env`.
 4. Agent chỉ làm action thuộc capability đã khai báo.
-5. Agent **không gọi agent khác**; chỉ gợi ý qua `next_actions`.
+5. Chỉ **PM** được gọi agent khác qua module conductor (mục 7b, Prompt 8); 9 agent còn lại **không gọi agent khác**, chỉ gợi ý qua `next_actions`.
 6. Mọi lỗi trả về `AgentError`; agent không được ném exception ra ngoài `handle()`.
 7. Mỗi agent có unit test, README, `.env.example`, demo script.
 
@@ -249,4 +253,43 @@ Bảng endpoint tiêu chuẩn:
 **Quy tắc bảo mật và xác thực:**
 - Mọi endpoint trừ `GET /health` bắt buộc phải có header `Authorization: Bearer <AGENT_API_KEY>`.
 - Token được kiểm tra bằng hàm an toàn `hmac.compare_digest`. Nếu sai hoặc thiếu token, trả HTTP 401 Unauthorized và **tuyệt đối không ghi token vào log**.
+
+## 2.9 Pipeline actions (Contract v1.1.0)
+
+| Role | Action | Capability | Tạo artifact | Đầu vào |
+| --- | --- | --- | --- | --- |
+| PO | `define_backlog` | `backlog_management` | `BACKLOG` | brief |
+| PO | `accept_release` | `acceptance` | `DOCUMENTATION` (verdict) | `TEST_REPORT`, `DEPLOYMENT` |
+| BA | `write_requirements` | `requirement_analysis` | `REQUIREMENT` | `BACKLOG`, brief |
+| BA | `write_user_stories` | `user_story` | `USER_STORY` | `REQUIREMENT` |
+| SA | `design_architecture` | `system_architecture` | `ARCHITECTURE` | `REQUIREMENT`, `USER_STORY` |
+| DBA | `design_schema` | `schema_design` | `DATABASE_SCHEMA` | `ARCHITECTURE`, `REQUIREMENT` |
+| DEV | `implement_project` | `coding` | `SOURCE_CODE` (.zip) | `ARCHITECTURE`, `DATABASE_SCHEMA`, `USER_STORY` |
+| DEV | `fix_bugs` | `bug_fixing` | `SOURCE_CODE` (.zip) | `SOURCE_CODE`, `TEST_REPORT` hoặc `SECURITY_REPORT` |
+| TESTER | `create_test_cases` | `test_case_generation` | `TEST_CASE` | `USER_STORY` |
+| TESTER | `run_test_suite` | `automated_testing` | `TEST_REPORT` (verdict) | `SOURCE_CODE`, `TEST_CASE` |
+| SECURITY | `security_review` | `security_review` | `SECURITY_REPORT` (verdict) | `SOURCE_CODE`, `ARCHITECTURE` |
+| DEVOPS | `generate_ci_config`, `build_image`, `deploy`, `health_check` | như mục 2.3 | `DEPLOYMENT` | `SOURCE_CODE` |
+| SCRUM_MASTER | `track_blockers` | `blocker_tracking` | `DOCUMENTATION` | nhật ký sự kiện dự án |
+| SCRUM_MASTER | `run_retrospective` | `retrospective` | `DOCUMENTATION` | nhật ký sự kiện dự án |
+
+**Quy ước verdict:**
+`outputs[0]` của TESTER, SECURITY và PO (nghiệm thu) có cấu trúc dạng:
+```json
+{
+  "verdict": "PASS" | "FAIL",
+  "findings": [
+    {
+      "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      "title": "Tên phát hiện",
+      "detail": "Mô tả chi tiết"
+    }
+  ]
+}
+```
+PM chỉ đọc `verdict` và `severity`, không đọc văn bản tự do để đưa ra quyết định chuyển tiếp hay kích hoạt vòng sửa lỗi.
+
+**Quy ước SOURCE_CODE:**
+Mã nguồn được chuyển giao giữa các máy độc lập dưới dạng một file nén `.zip` (artifact `SOURCE_CODE`), hoàn toàn không phụ thuộc thư mục dùng chung giữa các máy.
+
 
