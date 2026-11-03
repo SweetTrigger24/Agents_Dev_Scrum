@@ -1,4 +1,4 @@
-# AI Team Monorepo
+# AGENT - AI Team Monorepo
 
 Hệ thống 10 AI Agent độc lập xây dựng bởi đội ngũ 5 kỹ sư:
 PM, SA, BA, PO, DEV, TESTER, DEVOPS, DBA, SCRUM_MASTER, SECURITY.
