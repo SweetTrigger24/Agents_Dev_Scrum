@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.1.0",
+  "task_id": "SM-DEMO-01",
+  "project_id": "PROJ-DEMO",
+  "agent_id": "scrum_master-01",
+  "role": "SCRUM_MASTER",
+  "action": "track_blockers",
+  "instruction": "Báo cáo tiến độ phiên demo",
+  "context": {
+    "tasks": [
+      {
+        "id": "BA-01",
+        "status": "COMPLETED"
+      },
+      {
+        "id": "DEV-01",
+        "status": "RUNNING"
+      },
+      {
+        "id": "TEST-01",
+        "status": "BLOCKED",
+        "blocked_reason": "Chờ mã nguồn từ Developer"
+      }
+    ]
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "priority": "MEDIUM",
+    "timeout_seconds": 60
+  }
+}

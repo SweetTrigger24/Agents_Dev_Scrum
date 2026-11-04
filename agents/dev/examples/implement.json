@@ -1,0 +1,17 @@
+{
+  "contract_version": "1.1.0",
+  "task_id": "DEV-DEMO-01",
+  "project_id": "PROJ-DEMO",
+  "agent_id": "dev-01",
+  "role": "DEV",
+  "action": "implement_project",
+  "instruction": "Tạo website Todo List nhỏ với thêm, xóa và đánh dấu hoàn thành. Ưu tiên HTML CSS JS thuần để demo nhanh.",
+  "context": {
+    "brief": "Website quản lý công việc đơn giản"
+  },
+  "input_artifacts": [],
+  "constraints": {
+    "priority": "MEDIUM",
+    "timeout_seconds": 180
+  }
+}
