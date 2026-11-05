@@ -1,0 +1,43 @@
+{
+  "contract_version": "1.3.0",
+  "task_id": "SM-REVIEW-AUTH-001",
+  "project_id": "PROJECT-DEMO",
+  "agent_id": "scrum_master-01",
+  "role": "SCRUM_MASTER",
+  "action": "review_module",
+  "instruction": "Review module đăng nhập trước khi chuyển sang module quản lý người dùng.",
+  "context": {
+    "module_id": "AUTH",
+    "tasks": [
+      {"id": "DEV-AUTH", "module_id": "AUTH", "status": "COMPLETED"},
+      {"id": "TEST-AUTH", "module_id": "AUTH", "status": "COMPLETED"}
+    ],
+    "acceptance_criteria": [
+      {
+        "id": "AC-AUTH-001",
+        "description": "Đăng nhập hợp lệ và từ chối mật khẩu sai",
+        "status": "PASS",
+        "evidence": "test-report.json: test_valid_login và test_invalid_password đạt"
+      }
+    ]
+  },
+  "input_artifacts": [
+    {
+      "artifact_id": "ART-DEV-001",
+      "name": "source_auth.zip",
+      "type": "SOURCE_CODE",
+      "uri": "artifacts/source_auth.zip",
+      "created_by": "dev-01",
+      "created_at": "2026-11-05T00:00:00Z"
+    },
+    {
+      "artifact_id": "ART-TEST-001",
+      "name": "test-report.json",
+      "type": "TEST_REPORT",
+      "uri": "artifacts/test-report.json",
+      "created_by": "tester-01",
+      "created_at": "2026-11-05T00:00:00Z"
+    }
+  ],
+  "constraints": {"priority": "MEDIUM", "timeout_seconds": 180}
+}

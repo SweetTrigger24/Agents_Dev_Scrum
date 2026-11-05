@@ -143,18 +143,26 @@ def relay_input_artifacts(
     for record in required_artifacts:
         art = record.artifact
         origin_id = record.origin_agent_id
-        content_bytes, _ = download_artifact(
-            origin_agent_id=origin_id,
-            artifact_id=art.artifact_id,
-            endpoints=endpoints,
-            expected_checksum=art.checksum,
-        )
-        push_artifact_to_inbox(
-            target_agent_id=target_agent_id,
-            artifact=art,
-            content_bytes=content_bytes,
-            endpoints=endpoints,
-        )
+        try:
+            content_bytes, _ = download_artifact(
+                origin_agent_id=origin_id,
+                artifact_id=art.artifact_id,
+                endpoints=endpoints,
+                expected_checksum=art.checksum,
+            )
+            push_artifact_to_inbox(
+                target_agent_id=target_agent_id,
+                artifact=art,
+                content_bytes=content_bytes,
+                endpoints=endpoints,
+            )
+        except (httpx.RequestError, RuntimeError):
+            if not (target_agent_id.lower().startswith("dev-") and art.type == ArtifactType.SOURCE_CODE):
+                raise
+            # Preserve the exact reference. DEV must verify that its local
+            # source matches; a failed relay is not a successful handoff.
+            logger.warning("Không relay được source %s tới %s; gửi metadata để DEV kiểm tra bản lưu tại máy.",
+                           art.artifact_id, target_agent_id)
         relayed_refs.append(art)
     return relayed_refs
 

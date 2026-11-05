@@ -80,7 +80,7 @@ def test_pm(fake_server: FakeAgentsServer, monkeypatch: pytest.MonkeyPatch, tmp_
 # =============================================================================
 # Kịch bản 1: Luồng chính (Happy Path) -> RELEASE đầy đủ manifest.json
 # =============================================================================
-def test_1_main_pipeline_happy_path(test_pm):
+def test_1_main_pipeline_happy_path(test_pm, fake_server):
     pm, tmp_path = test_pm
     proj_id = "PROJ-HAPPY-01"
     brief = "Xây dựng dịch vụ xác thực người dùng và phân quyền vai trò cho hệ thống AI Team."
@@ -90,6 +90,14 @@ def test_1_main_pipeline_happy_path(test_pm):
 
     assert final_state.status == ProjectStatus.COMPLETED
     assert final_state.block_reason is None
+
+    scrum_requests = [t for t in fake_server.state.received_tasks if t.role == AgentRole.SCRUM_MASTER]
+    assert scrum_requests
+    snapshot = scrum_requests[-1].context["tasks"]
+    assert snapshot
+    assert any(t["name"] == "implement_project" and t["status"] == "COMPLETED" for t in snapshot)
+    assert all(t["name"] != "run_retrospective" for t in snapshot)
+    assert any(t["id"] == "dev_implement_project" for t in snapshot)
 
     # Kiểm tra thư mục release
     release_dir = tmp_path / "data" / "projects" / proj_id / "release"
@@ -136,6 +144,128 @@ def test_2_tester_fail_twice_then_pass(test_pm, fake_server: FakeAgentsServer):
         if t.role == AgentRole.DEV and t.action == "fix_bugs"
     ]
     assert len(fix_tasks) == 2, f"Phải gọi dev.fix_bugs đúng 2 lần, thực tế: {len(fix_tasks)}"
+
+
+@pytest.mark.parametrize("stage", ["download", "upload"])
+def test_dev_source_relay_failure_keeps_exact_reference_for_local_verification(monkeypatch, stage):
+    from datetime import datetime, timezone
+    from conductor import dispatcher
+    from conductor.state import ArtifactRecord
+    ref = ArtifactRef(artifact_id="ART-LOCAL", name="source.zip", type=ArtifactType.SOURCE_CODE,
+        uri="artifacts/source.zip", created_by="dev-01", created_at=datetime.now(timezone.utc), checksum="a" * 64)
+    def download(**kwargs):
+        if stage == "download":
+            raise RuntimeError("HTTP 404: unavailable source")
+        return b"source", "a" * 64
+    def upload(**kwargs):
+        raise RuntimeError("HTTP 503: upload unavailable")
+    monkeypatch.setattr(dispatcher, "download_artifact", download)
+    monkeypatch.setattr(dispatcher, "push_artifact_to_inbox", upload)
+    result = dispatcher.relay_input_artifacts("dev-01", [ArtifactRecord(artifact=ref, origin_agent_id="dev-01")], {})
+    assert result == [ref]
+    assert result[0].checksum == "a" * 64
+
+
+@pytest.mark.parametrize("scenario", ["checksum", "other_artifact", "other_role"])
+def test_source_fallback_does_not_bypass_other_relay_errors(monkeypatch, scenario):
+    from datetime import datetime, timezone
+    from conductor import dispatcher
+    from conductor.state import ArtifactRecord
+    kind = ArtifactType.TEST_REPORT if scenario == "other_artifact" else ArtifactType.SOURCE_CODE
+    ref = ArtifactRef(artifact_id="ART-LOCAL", name="file.zip", type=kind,
+        uri="artifacts/file.zip", created_by="dev-01", created_at=datetime.now(timezone.utc))
+    error = ValueError("Checksum mismatch") if scenario == "checksum" else RuntimeError("HTTP failure")
+    def download(**kwargs):
+        raise error
+    monkeypatch.setattr(dispatcher, "download_artifact", download)
+    target = "scrum_master-01" if scenario == "other_role" else "dev-01"
+    with pytest.raises(type(error)):
+        dispatcher.relay_input_artifacts(target, [ArtifactRecord(artifact=ref, origin_agent_id="dev-01")], {})
+
+
+@pytest.mark.parametrize("target_action", ["review_code", "refactor_code"])
+def test_dispatch_dev_skills_relays_source_and_preserves_metadata(test_pm, monkeypatch, target_action):
+    from datetime import datetime, timezone
+    import agent as pm_module
+    pm, tmp_path = test_pm
+    source = tmp_path / "artifacts" / "source.zip"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"fake-zip-relay-only")
+    ref = ArtifactRef(artifact_id="ART-SOURCE", name="source.zip", type=ArtifactType.SOURCE_CODE,
+        uri="artifacts/source.zip", created_by="dev-01", created_at=datetime.now(timezone.utc))
+    calls = []
+    def relay(target, records, endpoints):
+        assert target == "dev-01"
+        assert records[0].origin_agent_id == "dev-01"
+        calls.append("relay")
+        return [ref]
+    def send(target, request, endpoints, timeout_seconds):
+        assert calls == ["relay"]
+        assert request.role == AgentRole.DEV
+        assert request.action == target_action
+        assert request.input_artifacts == [ref]
+        assert request.context == {"acceptance_criteria": [{"id": "AC-1"}]}
+        assert timeout_seconds == request.constraints.timeout_seconds
+        return TaskResult(task_id=request.task_id, agent_id=target, status=TaskStatus.COMPLETED,
+            summary="Reviewed", metadata={"skill": "dev-review-code", "skill_applied": True})
+    monkeypatch.setattr(pm_module, "relay_input_artifacts", relay)
+    monkeypatch.setattr(pm_module, "send_task_request", send)
+    result = pm.handle(TaskRequest(task_id="DISPATCH-" + target_action, project_id="P", agent_id="pm-01",
+        role=AgentRole.PM, action="dispatch_task", instruction="Review the source", input_artifacts=[ref],
+        context={"target_agent_id": "dev-01", "target_action": target_action,
+                 "target_context": {"acceptance_criteria": [{"id": "AC-1"}]}}))
+    assert result.status == TaskStatus.COMPLETED, result
+    assert result.metadata["skill_applied"] is True
+    assert result.metadata["dispatched_to"] == "dev-01"
+
+
+@pytest.mark.parametrize("review_passes", [True, False, "wrong_module", "no_documentation", "false_flag", "missing_verdict"])
+def test_pm_module_boundary_preserves_scope_and_stops_when_blocked(test_pm, monkeypatch, review_passes):
+    from datetime import datetime, timezone
+    from agent_contract import make_error
+    pm, _ = test_pm
+    scoped_tasks = [{"id": "DEV-AUTH", "module_id": "AUTH", "status": "COMPLETED"}]
+    pm.conductor.workflow_def = {"steps": [
+        {"id": "review_auth", "role": "SCRUM_MASTER", "action": "review_module", "depends_on": [],
+         "instruction_template": "Review AUTH", "input_artifact_types": [], "expected_artifact_types": ["DOCUMENTATION"],
+         "context": {"module_id": "AUTH", "tasks": scoped_tasks}, "max_retries": 0},
+        {"id": "dev_next", "role": "DEV", "action": "implement_project", "depends_on": ["review_auth"],
+         "instruction_template": "Implement next module", "input_artifact_types": [],
+         "expected_artifact_types": ["SOURCE_CODE"], "max_retries": 0},
+    ]}
+    calls = []
+    def send(**kwargs):
+        req = kwargs["request"]
+        calls.append(req.action)
+        if req.action == "review_module":
+            assert req.context["tasks"] == scoped_tasks
+            assert req.context["module_id"] == "AUTH"
+            if not review_passes:
+                return TaskResult(task_id=req.task_id, agent_id=req.agent_id, status=TaskStatus.BLOCKED,
+                    summary="Module review blocked", error=make_error(ErrorCode.MISSING_CONTEXT, "Missing test evidence", retryable=False),
+                    outputs=[{"can_start_next_module": False}])
+        kind = ArtifactType.DOCUMENTATION if req.action == "review_module" else ArtifactType.SOURCE_CODE
+        ref = ArtifactRef(artifact_id="ART-" + req.action, name="result.md" if kind == ArtifactType.DOCUMENTATION else "source.zip",
+            type=kind, uri="artifacts/result", created_by=req.agent_id, created_at=datetime.now(timezone.utc))
+        output = {"module_id": "AUTH", "verdict": "PASS", "can_start_next_module": True}
+        artifacts = [ref]
+        if req.action == "review_module":
+            if review_passes == "wrong_module":
+                output["module_id"] = "OTHER"
+            elif review_passes == "no_documentation":
+                artifacts = []
+            elif review_passes == "false_flag":
+                output["can_start_next_module"] = False
+            elif review_passes == "missing_verdict":
+                output.pop("verdict")
+        return TaskResult(task_id=req.task_id, agent_id=req.agent_id, status=TaskStatus.COMPLETED,
+                          summary="Step complete", artifacts=artifacts, outputs=[output])
+    monkeypatch.setattr("conductor.orchestrator.send_task_request", send)
+    monkeypatch.setattr("conductor.orchestrator.package_release", lambda **kwargs: None)
+    state = pm.conductor.init_project("MODULE-GATE", "Module delivery", auto_approve=True)
+    final = pm.conductor.run_pipeline(state)
+    assert final.status == (ProjectStatus.COMPLETED if review_passes is True else ProjectStatus.BLOCKED)
+    assert calls == (["review_module", "implement_project"] if review_passes is True else ["review_module"])
 
 
 # =============================================================================

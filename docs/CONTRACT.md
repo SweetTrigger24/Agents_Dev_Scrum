@@ -1,5 +1,9 @@
 # Agent Contract v1.0
 
+> Cập nhật 1.3.0: SCRUM_MASTER bổ sung `review_module` → `scrum_management`, tạo DOCUMENTATION trước khi chuyển module tiếp theo. Xem [SCRUM_MODULE_REVIEW.md](SCRUM_MODULE_REVIEW.md) cho đầu vào và kết luận chuyển tiếp. Giữ nguyên cấu trúc TaskRequest/TaskResult.
+
+> Cập nhật 1.2.0: DEV bổ sung `review_code` → `code_review` (SOURCE_CODE → DOCUMENTATION) và `refactor_code` → `refactoring` (SOURCE_CODE → SOURCE_CODE + DOCUMENTATION). TaskRequest/TaskResult giữ nguyên cấu trúc. Xem [DEV_SCRUM_SKILLS.md](DEV_SCRUM_SKILLS.md) cho schema đầu ra riêng và cách PM gọi.
+
 > Đây là phần cần thống nhất với 4 người còn lại trước tiên. Sau khi **freeze** (Phase 7) chỉ được sửa bằng cách tăng version.
 
 ## 2.1 Enum thống nhất
@@ -18,7 +22,7 @@ Ghi chú: `PLAN`, `BACKLOG`, `OTHER` là phần bổ sung so với danh sách g�
 ## 2.2 Các model
 
 ```python
-CONTRACT_VERSION = "1.1.0"
+CONTRACT_VERSION = "1.3.0"
 
 class AgentIdentity(BaseModel):          # Agent tự khai báo
     contract_version: str = CONTRACT_VERSION
@@ -266,11 +270,14 @@ Bảng endpoint tiêu chuẩn:
 | DBA | `design_schema` | `schema_design` | `DATABASE_SCHEMA` | `ARCHITECTURE`, `REQUIREMENT` |
 | DEV | `implement_project` | `coding` | `SOURCE_CODE` (.zip) | `ARCHITECTURE`, `DATABASE_SCHEMA`, `USER_STORY` |
 | DEV | `fix_bugs` | `bug_fixing` | `SOURCE_CODE` (.zip) | `SOURCE_CODE`, `TEST_REPORT` hoặc `SECURITY_REPORT` |
+| DEV | `review_code` | `code_review` | `DOCUMENTATION` (JSON) | `SOURCE_CODE`, tiêu chí hoặc chỉ dẫn review |
+| DEV | `refactor_code` | `refactoring` | `SOURCE_CODE` (.zip), `DOCUMENTATION` (JSON) | `SOURCE_CODE`, mục tiêu refactor |
 | TESTER | `create_test_cases` | `test_case_generation` | `TEST_CASE` | `USER_STORY` |
 | TESTER | `run_test_suite` | `automated_testing` | `TEST_REPORT` (verdict) | `SOURCE_CODE`, `TEST_CASE` |
 | SECURITY | `security_review` | `security_review` | `SECURITY_REPORT` (verdict) | `SOURCE_CODE`, `ARCHITECTURE` |
 | DEVOPS | `generate_ci_config`, `build_image`, `deploy`, `health_check` | như mục 2.3 | `DEPLOYMENT` | `SOURCE_CODE` |
 | SCRUM_MASTER | `track_blockers` | `blocker_tracking` | `DOCUMENTATION` | nhật ký sự kiện dự án |
+| SCRUM_MASTER | `review_module` | `scrum_management` | `DOCUMENTATION` | snapshot module, tiêu chí nghiệm thu, `SOURCE_CODE`, `TEST_REPORT` |
 | SCRUM_MASTER | `run_retrospective` | `retrospective` | `DOCUMENTATION` | nhật ký sự kiện dự án |
 
 **Quy ước verdict:**

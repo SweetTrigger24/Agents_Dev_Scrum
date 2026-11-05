@@ -42,9 +42,9 @@ from schemas import (
     TaskItem,
     TrackProgressOutput,
 )
-from conductor.dispatcher import find_agent_id_for_role, load_endpoints, send_task_request
+from conductor.dispatcher import find_agent_id_for_role, load_endpoints, send_task_request, relay_input_artifacts
 from conductor.orchestrator import ConductorOrchestrator
-from conductor.state import ProjectState, ProjectStatus, StepStatus, load_project_state
+from conductor.state import ArtifactRecord, ProjectState, ProjectStatus, StepStatus, load_project_state
 from tools.artifact import ArtifactError, list_artifacts, read_artifact, save_artifact
 from tools.plan import create_plan
 from tools.task import (
@@ -924,21 +924,31 @@ class PMAgent(BaseAgent):
             else:
                 return failed_result(
                     request,
-                    make_error(code=ErrorCode.INVALID_INPUT, message="Thiếu target_agent_id hoặc target_role trong context."),
+                    make_error(code=ErrorCode.INVALID_INPUT, message="Thiếu target_agent_id hoặc target_role trong context.", retryable=False),
                     summary="Thiếu thông tin agent đích.",
                 )
+        role = AgentRole(target_role) if target_role else AgentRole(target_agent_id.rsplit("-", 1)[0].upper())
+        target_action = request.context.get("target_action", "unknown")
+        if target_action not in ACTION_MAP.get(role, {}):
+            return failed_result(request, make_error(ErrorCode.PERMISSION_DENIED,
+                "Action không thuộc vai trò đích.", retryable=False))
+        relayed = relay_input_artifacts(target_agent_id, [
+            ArtifactRecord(artifact=art, origin_agent_id=art.created_by) for art in request.input_artifacts
+        ], endpoints) if request.input_artifacts else []
         sub_req = TaskRequest(
             contract_version=request.contract_version,
-            task_id=request.context.get("dispatch_task_id") or f"TASK-DISPATCH-{int(time.time())}",
+            task_id=request.context.get("dispatch_task_id") or f"{request.task_id}-dispatch",
             project_id=request.project_id,
             agent_id=target_agent_id,
-            role=AgentRole(target_role) if target_role else AgentRole.PM,
-            action=request.context.get("target_action", "unknown"),
+            role=role,
+            action=target_action,
             instruction=request.instruction,
             context=request.context.get("target_context", {}),
+            input_artifacts=relayed,
             constraints=request.constraints,
         )
-        res = send_task_request(target_agent_id, sub_req, endpoints)
+        res = send_task_request(target_agent_id, sub_req, endpoints,
+            timeout_seconds=request.constraints.timeout_seconds)
         return TaskResult(
             contract_version=request.contract_version,
             task_id=request.task_id,
@@ -948,5 +958,7 @@ class PMAgent(BaseAgent):
             outputs=res.outputs,
             artifacts=res.artifacts,
             error=res.error,
+            next_actions=res.next_actions,
+            metadata={**res.metadata, "dispatched_to": target_agent_id},
         )
 

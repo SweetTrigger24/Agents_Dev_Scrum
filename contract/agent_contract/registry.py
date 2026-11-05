@@ -105,6 +105,8 @@ ACTION_MAP: dict[AgentRole, dict[str, str]] = {
     AgentRole.DEV: {
         "implement_project": "coding",
         "fix_bugs": "bug_fixing",
+        "review_code": "code_review",
+        "refactor_code": "refactoring",
     },
     AgentRole.TESTER: {
         "create_test_cases": "test_case_generation",
@@ -114,6 +116,7 @@ ACTION_MAP: dict[AgentRole, dict[str, str]] = {
         "security_review": "security_review",
     },
     AgentRole.SCRUM_MASTER: {
+        "review_module": "scrum_management",
         "track_blockers": "blocker_tracking",
         "run_retrospective": "retrospective",
     },

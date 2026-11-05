@@ -14,7 +14,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from agent_contract.models import AgentIdentity, TaskRequest
 from agent_contract.registry import CAPABILITY_REGISTRY
-from agent import BaseAgent
+from agent import BaseAgent, DeveloperAgent
 from config import AgentConfig
 from llm import LLMClient
 
@@ -29,7 +29,7 @@ def create_default_agent(config: AgentConfig, mock: bool = False) -> BaseAgent:
         capabilities=CAPABILITY_REGISTRY.get(config.agent_role, []),
     )
     llm = LLMClient(config=config, mock=mock)
-    return BaseAgent(identity=identity, config=config, llm=llm)
+    return DeveloperAgent(identity=identity, config=config, llm=llm)
 
 
 def main() -> None:

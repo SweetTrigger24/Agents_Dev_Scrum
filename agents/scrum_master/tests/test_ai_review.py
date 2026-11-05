@@ -56,6 +56,12 @@ def test_invalid_ai_json_marks_fallback(monkeypatch, tmp_path):
     assert value["reason"] == "invalid_ai_json"
 
 
+def test_non_object_cli_envelope_marks_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai_review.shutil, "which", lambda tool: "/fake/agy")
+    monkeypatch.setattr(ai_review.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="[]", stderr=""))
+    assert ai_review.review_report_with_antigravity("report", 75, tmp_path)["reason"] == "invalid_ai_json"
+
+
 def test_full_scrum_agent_marks_real_ai_usage(monkeypatch, tmp_path):
     from agent_contract.enums import AgentRole, TaskStatus
     from agent_contract.models import AgentIdentity, TaskRequest

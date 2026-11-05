@@ -49,3 +49,11 @@ def test_pipeline_actions_registered_for_all_roles():
             assert cap in CAPABILITY_REGISTRY[role], (
                 f"Action '{action}' của {role.value} ánh xạ tới capability '{cap}' không có trong CAPABILITY_REGISTRY."
             )
+
+
+def test_dev_actions_cover_declared_capabilities():
+    assert set(ACTION_MAP[AgentRole.DEV].values()) == set(CAPABILITY_REGISTRY[AgentRole.DEV])
+
+
+def test_scrum_module_review_registered():
+    assert ACTION_MAP[AgentRole.SCRUM_MASTER]["review_module"] == "scrum_management"

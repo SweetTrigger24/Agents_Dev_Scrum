@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "Cấu hình chuẩn 10 AI Agent độc lập trong hệ thống ai-team theo Agent Contract v1.0",
   "global_settings": {
-    "contract_version": "1.0.0",
+    "contract_version": "1.3.0",
     "contract_min_version": "1.0.0",
     "host": "0.0.0.0",
     "python_version": ">=3.11",
@@ -181,9 +181,9 @@
         "code_review"
       ],
       "actions": {
-        "write_code": "coding",
+        "implement_project": "coding",
         "refactor_code": "refactoring",
-        "fix_bug": "bug_fixing",
+        "fix_bugs": "bug_fixing",
         "review_code": "code_review"
       },
       "allowed_commands": "git,python,pytest,npm,mvn",
@@ -247,9 +247,8 @@
         "retrospective"
       ],
       "actions": {
-        "plan_sprint": "sprint_management",
+        "review_module": "scrum_management",
         "track_blockers": "blocker_tracking",
-        "facilitate_standup": "scrum_management",
         "run_retrospective": "retrospective"
       },
       "allowed_commands": "python,pytest",

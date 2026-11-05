@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from agent_contract.enums import AgentRole, AgentStatus, ArtifactType, ErrorCode, Priority, TaskStatus
-from agent_contract.models import ArtifactRef, Constraints, TaskRequest, TaskResult
+from agent_contract.models import CONTRACT_VERSION, ArtifactRef, Constraints, TaskRequest, TaskResult
 from conductor.dispatcher import (
     find_agent_id_for_role,
     load_endpoints,
@@ -230,6 +230,12 @@ class ConductorOrchestrator:
                 context_dict = dict(step_cfg.get("context", {}))
                 context_dict["project_id"] = state.project_id
                 context_dict["brief"] = state.brief
+                if role_str == "SCRUM_MASTER" and action_str != "review_module":
+                    context_dict["tasks"] = [
+                        {"id": s.id, "task_id": s.task_id, "name": s.action or s.gate or s.id,
+                         "status": s.status.value, "blocked_reason": s.error or ""}
+                        for s in state.steps.values() if s.id != sid
+                    ]
 
                 # Kiểm tra cờ execute cho devops deploy
                 if role_str == "DEVOPS" and action_str == "deploy":
@@ -253,7 +259,7 @@ class ConductorOrchestrator:
                     state.tasks_used += 1
 
                     task_req = TaskRequest(
-                        contract_version="1.1.0",
+                        contract_version=CONTRACT_VERSION,
                         task_id=task_id,
                         project_id=state.project_id,
                         agent_id=target_agent_id,
@@ -281,6 +287,28 @@ class ConductorOrchestrator:
                             state.status = ProjectStatus.BLOCKED
                             state.block_reason = f"Không thể kết nối tới {target_agent_id}: {err}"
                             step.status = StepStatus.BLOCKED
+                            self._update_pm_status(AgentStatus.BLOCKED)
+                            save_project_state(state, self.data_dir)
+                            return state
+
+                    # Module review is a handoff gate. Missing evidence cannot be
+                    # filled in from the brief or treated as an ordinary retry.
+                    if role_str == "SCRUM_MASTER" and action_str == "review_module":
+                        review = result.outputs[0] if result.outputs else {}
+                        allowed = (result.status == TaskStatus.COMPLETED
+                            and review.get("verdict") == "PASS"
+                            and review.get("can_start_next_module") is True
+                            and bool(context_dict.get("module_id"))
+                            and review.get("module_id") == context_dict["module_id"]
+                            and any(art.type == ArtifactType.DOCUMENTATION for art in result.artifacts))
+                        if not allowed:
+                            step.status = StepStatus.BLOCKED
+                            step.summary, step.artifacts = result.summary, result.artifacts
+                            step.error = result.error.message if result.error else "Module review chưa đủ bằng chứng PASS."
+                            state.status, state.block_reason = ProjectStatus.BLOCKED, step.error
+                            for art in result.artifacts:
+                                state.artifacts[art.artifact_id] = ArtifactRecord(artifact=art, origin_agent_id=target_agent_id)
+                            append_project_event(state.project_id, "MODULE_REVIEW_BLOCKED", {"step": sid, "summary": result.summary}, self.data_dir)
                             self._update_pm_status(AgentStatus.BLOCKED)
                             save_project_state(state, self.data_dir)
                             return state
@@ -479,7 +507,7 @@ class ConductorOrchestrator:
         if not source_code_rec or not report_rec:
             logger.error("Không tìm thấy đủ SOURCE_CODE và TEST/SECURITY_REPORT cho vòng sửa lỗi.")
             return TaskResult(
-                contract_version="1.1.0",
+                contract_version=CONTRACT_VERSION,
                 task_id=f"TASK-{state.project_id}-FIX-ERR",
                 agent_id=dev_agent_id,
                 status=TaskStatus.FAILED,
@@ -492,7 +520,7 @@ class ConductorOrchestrator:
         relayed = relay_input_artifacts(dev_agent_id, [source_code_rec, report_rec], endpoints)
 
         fix_req = TaskRequest(
-            contract_version="1.1.0",
+            contract_version=CONTRACT_VERSION,
             task_id=dev_fix_task_id,
             project_id=state.project_id,
             agent_id=dev_agent_id,
@@ -521,7 +549,7 @@ class ConductorOrchestrator:
         relayed_tester = relay_input_artifacts(tester_agent_id, inputs_for_tester, endpoints)
 
         test_req = TaskRequest(
-            contract_version="1.1.0",
+            contract_version=CONTRACT_VERSION,
             task_id=tester_task_id,
             project_id=state.project_id,
             agent_id=tester_agent_id,
@@ -547,7 +575,7 @@ class ConductorOrchestrator:
             inputs_sec = [source_code_rec] + ([arch_rec] if arch_rec else [])
             relayed_sec = relay_input_artifacts(sec_agent_id, inputs_sec, endpoints)
             sec_req = TaskRequest(
-                contract_version="1.1.0",
+                contract_version=CONTRACT_VERSION,
                 task_id=sec_task_id,
                 project_id=state.project_id,
                 agent_id=sec_agent_id,
