@@ -2,6 +2,13 @@
 
 Skill nằm trong repo để mỗi máy chạy agent nhận được cùng hướng dẫn. Không cần cài vào thư mục skill cá nhân của Codex. Loader `tools/skills.py` của từng agent chọn skill theo `TaskRequest.action`, không theo đường dẫn do PM gửi.
 
+## Nơi chỉnh prompt, skill và tool
+
+- DEV: `agents/dev/prompt.py` chứa `DEV_SYSTEM_PROMPT` và `build_dev_prompt()` để ghép quy tắc chung, skill đã chọn, schema bàn giao và dữ liệu PM. `agent.py` gọi hàm này trước khi chạy Codex.
+- Scrum Master: `agents/scrum_master/prompt.py` chứa `SCRUM_SYSTEM_PROMPT` và `build_scrum_review_prompt()` để ghép quy tắc chung, skill và báo cáo Python. `tools/ai_review.py` gọi hàm này rồi thực hiện kết nối Antigravity và kiểm tra phản hồi.
+- Chỉnh quy trình riêng của từng action trong `skills/<tên-skill>/SKILL.md`. Các hàm trong `tools/` vẫn đọc/lưu file, xác minh dữ liệu và xử lý các thao tác cụ thể; `agent.py` điều khiển luồng thực hiện.
+- `build_messages()` trong hai file prompt.py vẫn phục vụ action mẫu echo. Prompt chính không được ghép trực tiếp trong agent.py hoặc tools/ai_review.py nữa. Phần điều phối giữa các agent vẫn thuộc PM.
+
 | Agent | Action PM gọi | Skill trong thư mục agent |
 | --- | --- | --- |
 | DEV | `implement_project` | `skills/dev-implement/SKILL.md` |
